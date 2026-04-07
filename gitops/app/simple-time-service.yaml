@@ -27,7 +27,7 @@ spec:
               enabled: true
       destination:
         server: '{{.server}}'
-        namespace: default
+        namespace: simple-time-service
       syncPolicy:
         automated:
           prune: true

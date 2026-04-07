@@ -34,7 +34,7 @@ kubectl port-forward svc/argocd-server -n argocd 8080:443
 # Open https://localhost:8080 - simple-time-service, prometheus, and metrics-server apps should appear
 
 # 6. Verify the service
-kubectl port-forward svc/simple-time-service 8080:80
+kubectl port-forward svc/simple-time-service -n simple-time-service 8080:80
 curl http://127.0.0.1:8080/
 
 # 7. Verify Grafana
@@ -350,14 +350,14 @@ helm upgrade simple-time-service charts/simple-time-service
 ### Verify the deployment
 
 ```bash
-kubectl rollout status deployment/simple-time-service
-kubectl get pods -l app.kubernetes.io/name=simple-time-service
+kubectl rollout status deployment/simple-time-service -n simple-time-service
+kubectl get pods -n simple-time-service -l app.kubernetes.io/name=simple-time-service
 ```
 
 ### Access the service
 
 ```bash
-kubectl port-forward svc/simple-time-service 8080:80
+kubectl port-forward svc/simple-time-service -n simple-time-service 8080:80
 curl http://127.0.0.1:8080/
 ```
 
@@ -597,7 +597,7 @@ It is deployed into `kube-system` via ArgoCD using the [metrics-server Helm char
 Verify it is running:
 
 ```bash
-kubectl top pods -n default
+kubectl top pods -n simple-time-service
 kubectl top nodes
 ```
 
@@ -628,14 +628,14 @@ The defaults are deliberately asymmetric: scale-up is fast (add up to 2 pods eve
 Verify the HPA after ArgoCD syncs:
 
 ```bash
-kubectl get hpa -n default
+kubectl get hpa -n simple-time-service
 ```
 
 To observe autoscaling in action, generate load against the service:
 
 ```bash
 # Forward the service in one terminal
-kubectl port-forward svc/simple-time-service 8080:80
+kubectl port-forward svc/simple-time-service -n simple-time-service 8080:80
 
 # Generate load in another terminal
 while true; do curl -s http://localhost:8080/ > /dev/null; done
@@ -644,7 +644,8 @@ while true; do curl -s http://localhost:8080/ > /dev/null; done
 Then watch the HPA react:
 
 ```bash
-kubectl get hpa -n default -w
+kubectl get hpa -n simple-time-service -w
+
 ```
 
 > For a lightweight service like this, CPU utilization rises slowly under simple `curl` traffic. You may need to sustain the load for a short period before the HPA triggers a scale-out event. Scaling down after load stops is intentionally conservative - the default stabilization window is 5 minutes, configurable via `hpa.scaleDown.stabilizationWindowSeconds`.
@@ -689,7 +690,7 @@ prometheusOperator:
 
 TLS and admission webhooks on the operator are disabled to simplify initial cluster setup. Enable them in production environments for additional security.
 
-`serviceMonitorSelectorNilUsesHelmValues: false` tells Prometheus to discover `ServiceMonitor` resources across **all namespaces**, not just the `monitoring` namespace where Prometheus itself runs. Without this, `ServiceMonitor` resources created in `default` (or any other namespace) are silently ignored.
+`serviceMonitorSelectorNilUsesHelmValues: false` tells Prometheus to discover `ServiceMonitor` resources across **all namespaces**, not just the `monitoring` namespace where Prometheus itself runs. Without this, `ServiceMonitor` resources created in `simple-time-service` (or any other namespace) are silently ignored.
 
 ### Access Grafana
 
@@ -721,7 +722,7 @@ Open [http://localhost:9090](http://localhost:9090) to query metrics directly.
 **1. Confirm the ServiceMonitor resource exists:**
 
 ```bash
-kubectl get servicemonitor -n default
+kubectl get servicemonitor -n simple-time-service
 # Should show: simple-time-service
 ```
 
@@ -749,7 +750,7 @@ You should see time-series with labels like `handler="/"` and `method="GET"`. If
 
 ```bash
 # Forward the service in one terminal
-kubectl port-forward svc/simple-time-service 8080:80
+kubectl port-forward svc/simple-time-service -n simple-time-service 8080:80
 
 # Hit the endpoint a few times to generate metrics
 curl http://localhost:8080/
@@ -765,7 +766,7 @@ curl http://localhost:8080/metrics | grep http_requests_total
 
 ```bash
 kubectl apply -f k8s/microservice.yaml
-kubectl port-forward svc/simple-time-service 8080:80
+kubectl port-forward svc/simple-time-service -n simple-time-service 8080:80
 curl http://localhost:8080/
 ```
 
@@ -805,7 +806,7 @@ Expected response:
 
 ## Deploying to Kubernetes
 
-The manifest at `k8s/microservice.yaml` contains both a `Deployment` and a `ClusterIP` `Service`. No namespace is specified in the manifest, so resources are deployed into whichever namespace your current kubectl context is set to (typically `default`). A single command is all that is needed:
+The manifest at `k8s/microservice.yaml` contains both a `Deployment` and a `ClusterIP` `Service`. No namespace is specified in the manifest, so resources are deployed into whichever namespace your current kubectl context is set to (typically `default`). This is a quick-start path only - the Helm chart deployed via ArgoCD uses the `simple-time-service` namespace. A single command is all that is needed:
 
 ```bash
 kubectl apply -f k8s/microservice.yaml
@@ -817,13 +818,13 @@ kubectl apply -f k8s/microservice.yaml
 
 ```bash
 # Wait for pods to become ready
-kubectl rollout status deployment/simple-time-service
+kubectl rollout status deployment/simple-time-service -n simple-time-service
 
 # Check pods
-kubectl get pods -l app=simple-time-service -w
+kubectl get pods -n simple-time-service -l app=simple-time-service -w
 
 # Check the service
-kubectl get svc simple-time-service
+kubectl get svc simple-time-service -n simple-time-service
 ```
 
 ## Deployment validation
@@ -839,7 +840,7 @@ The application is considered successfully deployed when:
 Because the Service type is `ClusterIP`, use `kubectl port-forward` to reach it from your local machine:
 
 ```bash
-kubectl port-forward svc/simple-time-service 8080:80
+kubectl port-forward svc/simple-time-service -n simple-time-service 8080:80
 ```
 
 Then in a second terminal:
@@ -1025,8 +1026,8 @@ Metrics are emitted by [`prometheus-fastapi-instrumentator`](https://github.com/
 |---------|-----|
 | `kubectl get nodes` returns `Unauthorized` | Run `aws eks update-kubeconfig` using the same IAM identity that ran `terraform apply`, or add that identity as an EKS access entry. |
 | ArgoCD apps not appearing after bootstrap | Manually sync the root app: `argocd app sync root-app` or click **Sync** on the root-app tile in the UI. |
-| Service not reachable from localhost | The Service type is `ClusterIP`. Use `kubectl port-forward svc/simple-time-service 8080:80` to reach it locally. |
-| `simple-time-service` ServiceMonitor not appearing in Prometheus targets | By default, Prometheus only discovers `ServiceMonitor` resources in the `monitoring` namespace. Set `serviceMonitorSelectorNilUsesHelmValues: false` in `prometheusSpec` (see [prometheus.yaml](gitops/prometheus/prometheus.yaml)) so Prometheus watches all namespaces. Also confirm `serviceMonitor.enabled: true` is set in the app's Helm values (see [simple-time-service.yaml](gitops/app/simple-time-service.yaml)). Verify with `kubectl get servicemonitor -n default`. |
+| Service not reachable from localhost | The Service type is `ClusterIP`. Use `kubectl port-forward svc/simple-time-service -n simple-time-service 8080:80` to reach it locally. |
+| `simple-time-service` ServiceMonitor not appearing in Prometheus targets | By default, Prometheus only discovers `ServiceMonitor` resources in the `monitoring` namespace. Set `serviceMonitorSelectorNilUsesHelmValues: false` in `prometheusSpec` (see [prometheus.yaml](gitops/prometheus/prometheus.yaml)) so Prometheus watches all namespaces. Also confirm `serviceMonitor.enabled: true` is set in the app's Helm values (see [simple-time-service.yaml](gitops/app/simple-time-service.yaml)). Verify with `kubectl get servicemonitor -n simple-time-service`. |
 | `kubectl top pods` returns `error: Metrics API not available` | `metrics-server` is not running or not yet ready. Check with `kubectl get pods -n kube-system -l app.kubernetes.io/name=metrics-server`. If ArgoCD has not synced yet, trigger a manual sync. |
-| HPA shows `<unknown>/70%` for CPU utilization | `metrics-server` is not available or the pods have no CPU requests set. Verify `kubectl top pods -n default` works and that `resources.requests.cpu` is defined in `values.yaml`. |
-| HPA is not scaling despite high load | Confirm `hpa.enabled: true` is set in the ArgoCD ApplicationSet override ([simple-time-service.yaml](gitops/app/simple-time-service.yaml)) and that ArgoCD has synced. Check `kubectl describe hpa simple-time-service -n default` for events. |
+| HPA shows `<unknown>/70%` for CPU utilization | `metrics-server` is not available or the pods have no CPU requests set. Verify `kubectl top pods -n simple-time-service` works and that `resources.requests.cpu` is defined in `values.yaml`. |
+| HPA is not scaling despite high load | Confirm `hpa.enabled: true` is set in the ArgoCD ApplicationSet override ([simple-time-service.yaml](gitops/app/simple-time-service.yaml)) and that ArgoCD has synced. Check `kubectl describe hpa simple-time-service -n simple-time-service` for events. |
