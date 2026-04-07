@@ -5,7 +5,9 @@ metadata:
   labels:
     {{- include "simple-time-service.labels" . | nindent 4 }}
 spec:
+  {{- if not .Values.hpa.enabled }}
   replicas: {{ .Values.replicaCount }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "simple-time-service.selectorLabels" . | nindent 6 }}

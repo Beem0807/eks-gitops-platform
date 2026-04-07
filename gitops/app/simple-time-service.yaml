@@ -23,6 +23,8 @@ spec:
               tag: latest
             serviceMonitor:
               enabled: true
+            hpa:
+              enabled: true
       destination:
         server: '{{.server}}'
         namespace: default

@@ -6,6 +6,7 @@ This repository contains four components:
 2. **Terraform infrastructure** - an AWS VPC and EKS cluster provisioned with Terraform.
 3. **GitOps platform** - ArgoCD running on the EKS cluster, managing deployments via the App of Apps pattern.
 4. **Monitoring** - Prometheus and Grafana deployed via ArgoCD using the `kube-prometheus-stack` Helm chart.
+5. **Autoscaling** - `metrics-server` deployed via ArgoCD enabling HPA-based horizontal pod autoscaling for SimpleTimeService.
 
 > **Naming note:** The application is called SimpleTimeService. Its source code lives under `sample-workload/`, the raw Kubernetes manifest is in `k8s/microservice.yaml`, and the Helm release name is `simple-time-service`. These names refer to the same service.
 
@@ -30,7 +31,7 @@ kubectl apply -f gitops/bootstrap/root-app.yaml
 
 # 5. Verify applications in ArgoCD
 kubectl port-forward svc/argocd-server -n argocd 8080:443
-# Open https://localhost:8080 - both simple-time-service and prometheus apps should appear
+# Open https://localhost:8080 - simple-time-service, prometheus, and metrics-server apps should appear
 
 # 6. Verify the service
 kubectl port-forward svc/simple-time-service 8080:80
@@ -85,8 +86,10 @@ The service is containerized with Docker and runs as a non-root user. It can be 
 │   │   └── root-app.yaml          # ArgoCD root Application (App of Apps bootstrap)
 │   ├── app/
 │   │   └── simple-time-service.yaml  # ArgoCD ApplicationSet (multi-cluster Helm deploy)
-│   └── prometheus/
-│       └── prometheus.yaml         # ArgoCD ApplicationSet - kube-prometheus-stack (Prometheus + Grafana + Alertmanager)
+│   ├── prometheus/
+│   │   └── prometheus.yaml         # ArgoCD ApplicationSet - kube-prometheus-stack (Prometheus + Grafana + Alertmanager)
+│   └── metrics-server/
+│       └── metrics-server.yaml     # ArgoCD Application - metrics-server (required for HPA)
 ├── k8s/
 │   └── microservice.yaml          # Kubernetes Deployment + ClusterIP Service
 ├── charts/
@@ -99,6 +102,7 @@ The service is containerized with Docker and runs as a non-root user. It can be 
 │           ├── service.yaml
 │           ├── serviceaccount.yaml
 │           ├── pdb.yaml
+│           ├── hpa.yaml
 │           └── NOTES.txt
 ├── sample-workload/
 │   ├── Dockerfile
@@ -196,7 +200,7 @@ The IAM principal used by Terraform needs permissions to create and manage: VPC 
 
 A convenient starting point is the AWS managed policies `AmazonEKSClusterPolicy` and `AmazonEKSWorkerNodePolicy` combined with VPC and IAM write permissions. For production use, scope these down to the minimum required.
 
-> **S3 backend note:** If you are using the S3 remote state backend (`backend.tf`), the Terraform principal also needs S3 permissions on the state bucket: `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject`, and `s3:ListBucket`. If native S3 state locking is enabled (use_lockfile = true), no DynamoDB table or DynamoDB permissions are required.
+> **S3 backend note:** If you are using the S3 remote state backend (`backend.tf`), the Terraform principal also needs S3 permissions on the state bucket: `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject`, and `s3:ListBucket`. If native S3 state locking is enabled (`use_lockfile = true`), no DynamoDB table or DynamoDB permissions are required.
 
 ---
 
@@ -312,7 +316,7 @@ This removes all AWS resources created by Terraform. Confirm with `yes` when pro
 
 ## Helm Chart
 
-The chart at `charts/simple-time-service/` is the recommended way to deploy the service to Kubernetes. It provides configurable replicas, resource limits, health probes, a PodDisruptionBudget, and a full set of security-context defaults - all tuneable through `values.yaml`.
+The chart at `charts/simple-time-service/` is the recommended way to deploy the service to Kubernetes. It provides configurable replicas, resource limits, health probes, a PodDisruptionBudget, HPA-based autoscaling, and a full set of security-context defaults - all tuneable through `values.yaml`.
 
 > The raw manifest at `k8s/microservice.yaml` is a minimal alternative for quickly testing the service. The Helm chart is the configurable deployment used by ArgoCD in this platform.
 
@@ -397,6 +401,16 @@ All values can be overridden with `--set key=value` or a custom values file (`-f
 | `serviceAccount.create` | `false` | Create a dedicated ServiceAccount |
 | `serviceAccount.name` | `""` | ServiceAccount name (if not auto-generated) |
 | `serviceAccount.annotations` | `{}` | Annotations for the ServiceAccount |
+| `hpa.enabled` | `false` | Create a HorizontalPodAutoscaler (requires `metrics-server`) |
+| `hpa.minReplicas` | `2` | Minimum number of replicas |
+| `hpa.maxReplicas` | `10` | Maximum number of replicas |
+| `hpa.targetCPUAverageUtilization` | `70` | Target average CPU utilization across pods |
+| `hpa.scaleDown.stabilizationWindowSeconds` | `300` | Seconds to wait after load drops before scaling down |
+| `hpa.scaleDown.pods` | `1` | Max pods to remove per scale-down period |
+| `hpa.scaleDown.periodSeconds` | `60` | Scale-down policy period length in seconds |
+| `hpa.scaleUp.stabilizationWindowSeconds` | `0` | Seconds to wait before scaling up (0 = immediate) |
+| `hpa.scaleUp.pods` | `2` | Max pods to add per scale-up period |
+| `hpa.scaleUp.periodSeconds` | `30` | Scale-up policy period length in seconds |
 | `pdb.enabled` | `true` | Create a PodDisruptionBudget |
 | `pdb.minAvailable` | `1` | Minimum pods available during disruptions |
 | `serviceMonitor.enabled` | `false` | Create a Prometheus `ServiceMonitor` (requires Prometheus Operator) |
@@ -437,15 +451,22 @@ gitops/
 │   └── root-app.yaml          # Root Application - watches gitops/ recursively
 ├── app/
 │   └── simple-time-service.yaml  # ApplicationSet - deploys Helm chart to each registered cluster
-└── prometheus/
-    └── prometheus.yaml         # ApplicationSet - kube-prometheus-stack (Prometheus + Grafana + Alertmanager)
+├── prometheus/
+│   └── prometheus.yaml         # ApplicationSet - kube-prometheus-stack (Prometheus + Grafana + Alertmanager)
+└── metrics-server/
+    └── metrics-server.yaml     # Application - metrics-server (required for HPA)
 ```
 
 ### How it works
 
 1. **Root Application** (`gitops/bootstrap/root-app.yaml`) - deployed manually once. It is configured to watch the `gitops/` directory and create `Application` or `ApplicationSet` resources declared within it.
-2. **ApplicationSet** (`gitops/app/simple-time-service.yaml`) - discovered automatically by the root app. Uses the cluster generator to deploy the `charts/simple-time-service` Helm chart to every cluster registered in ArgoCD.
+2. **ApplicationSet** (`gitops/app/simple-time-service.yaml`) - discovered automatically by the root app. Uses the cluster generator to deploy the `charts/simple-time-service` Helm chart to every cluster registered in ArgoCD. HPA is enabled via a Helm value override in this file:
+   ```yaml
+   hpa:
+     enabled: true
+   ```
 3. **Prometheus ApplicationSet** (`gitops/prometheus/prometheus.yaml`) - discovered automatically by the root app. Deploys the `kube-prometheus-stack` Helm chart to every registered cluster, providing Prometheus, Grafana, and Alertmanager in the `monitoring` namespace.
+4. **metrics-server Application** (`gitops/metrics-server/metrics-server.yaml`) - discovered automatically by the root app. Deploys `metrics-server` into `kube-system`, which is a prerequisite for the Kubernetes HPA to collect CPU/memory utilization data.
 
 After bootstrap, changes merged to `main` are automatically picked up by ArgoCD and reconciled according to the configured sync policy.
 
@@ -560,6 +581,76 @@ Any `git push` to `main` that modifies files under `gitops/` or `charts/` will b
 
 ---
 
+## Autoscaling - HPA and metrics-server
+
+### metrics-server
+
+`metrics-server` aggregates CPU and memory usage from the Kubelets and exposes them via the Kubernetes Metrics API (`metrics.k8s.io`). It is a hard prerequisite for the HPA controller to function - without it, the HPA cannot read pod utilization and no scaling decisions are made.
+
+It is deployed into `kube-system` via ArgoCD using the [metrics-server Helm chart](https://github.com/kubernetes-sigs/metrics-server). Two flags are set to make it work correctly on EKS:
+
+| Flag | Reason |
+|------|--------|
+| `--kubelet-preferred-address-types=InternalIP` | EKS node hostnames are not resolvable inside the cluster; using the internal IP avoids DNS lookup failures |
+| `--kubelet-insecure-tls` | Skips kubelet TLS verification - acceptable for demos; configure proper CA certs in production |
+
+Verify it is running:
+
+```bash
+kubectl top pods -n default
+kubectl top nodes
+```
+
+### HorizontalPodAutoscaler
+
+The Helm chart includes an optional HPA (`charts/simple-time-service/templates/hpa.yaml`). It is **disabled by default** in `values.yaml` and enabled via a Helm value override in the ArgoCD ApplicationSet (`gitops/app/simple-time-service.yaml`):
+
+```yaml
+hpa:
+  enabled: true
+```
+
+When enabled, the HPA targets 70% average CPU utilization and scales between 2 and 10 replicas. The `replicas` field is omitted from the Deployment when HPA is active to prevent the Deployment controller and HPA from conflicting over the replica count.
+
+Scale-up and scale-down behavior is configurable via `values.yaml`:
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `hpa.scaleDown.stabilizationWindowSeconds` | `300` | How long to wait after load drops before scaling down |
+| `hpa.scaleDown.pods` | `1` | Max pods to remove per period when scaling down |
+| `hpa.scaleDown.periodSeconds` | `60` | Period length for scale-down policy |
+| `hpa.scaleUp.stabilizationWindowSeconds` | `0` | How long to wait before scaling up (0 = immediate) |
+| `hpa.scaleUp.pods` | `2` | Max pods to add per period when scaling up |
+| `hpa.scaleUp.periodSeconds` | `30` | Period length for scale-up policy |
+
+The defaults are deliberately asymmetric: scale-up is fast (add up to 2 pods every 30s with no stabilization delay) to handle spikes quickly, while scale-down is conservative (remove 1 pod per minute, only after 5 minutes of sustained low load) to avoid thrashing.
+
+Verify the HPA after ArgoCD syncs:
+
+```bash
+kubectl get hpa -n default
+```
+
+To observe autoscaling in action, generate load against the service:
+
+```bash
+# Forward the service in one terminal
+kubectl port-forward svc/simple-time-service 8080:80
+
+# Generate load in another terminal
+while true; do curl -s http://localhost:8080/ > /dev/null; done
+```
+
+Then watch the HPA react:
+
+```bash
+kubectl get hpa -n default -w
+```
+
+> For a lightweight service like this, CPU utilization rises slowly under simple `curl` traffic. You may need to sustain the load for a short period before the HPA triggers a scale-out event. Scaling down after load stops is intentionally conservative - the default stabilization window is 5 minutes, configurable via `hpa.scaleDown.stabilizationWindowSeconds`.
+
+---
+
 ## Monitoring - Prometheus, Grafana, and Alertmanager
 
 The `gitops/prometheus/prometheus.yaml` ApplicationSet deploys the [`kube-prometheus-stack`](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack) Helm chart to every cluster registered in ArgoCD.
@@ -652,7 +743,7 @@ In the Prometheus UI ([http://localhost:9090](http://localhost:9090)), run:
 http_requests_total
 ```
 
-You should see time-series with labels like `handler="/"` and `method="GET"`. If the result is empty, the service has not received any requests yet — send a few with `curl` and re-query.
+You should see time-series with labels like `handler="/"` and `method="GET"`. If the result is empty, the service has not received any requests yet - send a few with `curl` and re-query.
 
 **4. Quick end-to-end check via curl:**
 
@@ -847,7 +938,7 @@ image: docker.io/<your-dockerhub-username>/simple-time-service:latest
 kubectl delete -f gitops/bootstrap/root-app.yaml
 ```
 
-Wait for ArgoCD to finish pruning. With `prune: true` in the sync policy, ArgoCD should remove the managed resources and namespaces — verify in the UI or with `kubectl get ns` that they are gone before proceeding.
+Wait for ArgoCD to finish pruning. With `prune: true` in the sync policy, ArgoCD should remove the managed resources and namespaces - verify in the UI or with `kubectl get ns` that they are gone before proceeding.
 
 ### 2 - Uninstall ArgoCD
 
@@ -912,12 +1003,12 @@ Metrics are emitted by [`prometheus-fastapi-instrumentator`](https://github.com/
 |--------|------|--------|-------------|
 | `http_requests_total` | Counter | `method`, `handler`, `status` | Total HTTP requests completed |
 | `http_request_duration_seconds` | Histogram | `method`, `handler`, `status` | Request latency distribution (use for p50/p95/p99) |
-| `http_request_duration_highr_seconds` | Histogram | - | High-resolution latency histogram (no label cardinality) |
+| `http_request_duration_highr_seconds` | Histogram | — | High-resolution latency histogram (no label cardinality) |
 | `http_request_size_bytes` | Histogram | `method`, `handler` | Incoming request body size |
 | `http_response_size_bytes` | Histogram | `method`, `handler` | Outgoing response body size |
 | `http_requests_inprogress` | Gauge | `method`, `handler` | Currently in-flight requests |
-| `process_*` | Various | - | Python process metrics (CPU, memory, file descriptors) |
-| `python_*` | Various | - | Python runtime metrics (GC, info) |
+| `process_*` | Various | — | Python process metrics (CPU, memory, file descriptors) |
+| `python_*` | Various | — | Python runtime metrics (GC, info) |
 
 ## Technology
 
@@ -936,3 +1027,6 @@ Metrics are emitted by [`prometheus-fastapi-instrumentator`](https://github.com/
 | ArgoCD apps not appearing after bootstrap | Manually sync the root app: `argocd app sync root-app` or click **Sync** on the root-app tile in the UI. |
 | Service not reachable from localhost | The Service type is `ClusterIP`. Use `kubectl port-forward svc/simple-time-service 8080:80` to reach it locally. |
 | `simple-time-service` ServiceMonitor not appearing in Prometheus targets | By default, Prometheus only discovers `ServiceMonitor` resources in the `monitoring` namespace. Set `serviceMonitorSelectorNilUsesHelmValues: false` in `prometheusSpec` (see [prometheus.yaml](gitops/prometheus/prometheus.yaml)) so Prometheus watches all namespaces. Also confirm `serviceMonitor.enabled: true` is set in the app's Helm values (see [simple-time-service.yaml](gitops/app/simple-time-service.yaml)). Verify with `kubectl get servicemonitor -n default`. |
+| `kubectl top pods` returns `error: Metrics API not available` | `metrics-server` is not running or not yet ready. Check with `kubectl get pods -n kube-system -l app.kubernetes.io/name=metrics-server`. If ArgoCD has not synced yet, trigger a manual sync. |
+| HPA shows `<unknown>/70%` for CPU utilization | `metrics-server` is not available or the pods have no CPU requests set. Verify `kubectl top pods -n default` works and that `resources.requests.cpu` is defined in `values.yaml`. |
+| HPA is not scaling despite high load | Confirm `hpa.enabled: true` is set in the ArgoCD ApplicationSet override ([simple-time-service.yaml](gitops/app/simple-time-service.yaml)) and that ArgoCD has synced. Check `kubectl describe hpa simple-time-service -n default` for events. |
