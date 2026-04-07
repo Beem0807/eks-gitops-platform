@@ -62,6 +62,9 @@ hpa:
     pods: 2                          # add at most 2 pods per period
     periodSeconds: 30
 
+networkPolicy:
+  enabled: false
+
 pdb:
   enabled: true
   minAvailable: 1

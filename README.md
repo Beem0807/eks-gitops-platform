@@ -1,6 +1,6 @@
 # EKS GitOps Platform
 
-This repository contains four components:
+This repository contains five components:
 
 1. **SimpleTimeService** - a minimal Python microservice containerized with Docker and deployable to Kubernetes.
 2. **Terraform infrastructure** - an AWS VPC and EKS cluster provisioned with Terraform.
@@ -103,6 +103,7 @@ The service is containerized with Docker and runs as a non-root user. It can be 
 │           ├── serviceaccount.yaml
 │           ├── pdb.yaml
 │           ├── hpa.yaml
+│           ├── networkpolicy.yaml
 │           └── NOTES.txt
 ├── sample-workload/
 │   ├── Dockerfile
@@ -162,7 +163,7 @@ The service is containerized with Docker and runs as a non-root user. It can be 
 | NAT Gateway | Single NAT gateway so private-subnet nodes can reach the internet |
 | EKS cluster | Kubernetes 1.33, API endpoint publicly accessible (no CIDR restriction - acceptable for demos, but restrict `public_access_cidrs` in production) |
 | Managed node group | `node_desired_size` × `m6a.large` on-demand nodes placed on private subnets only |
-| EKS add-ons | `coredns`, `kube-proxy`, `vpc-cni` managed by the EKS module |
+| EKS add-ons | `coredns`, `kube-proxy`, `vpc-cni` (with Network Policy controller enabled) managed by the EKS module |
 
 The EKS module used is [`terraform-aws-modules/eks/aws`](https://registry.terraform.io/modules/terraform-aws-modules/eks/aws/latest) and the VPC module is [`terraform-aws-modules/vpc/aws`](https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws/latest).
 
@@ -330,13 +331,10 @@ The chart at `charts/simple-time-service/` is the recommended way to deploy the 
 ### Install
 
 ```bash
-# From the repository root
+# Into the default namespace
 helm install simple-time-service charts/simple-time-service
-```
 
-To install into a specific namespace:
-
-```bash
+# Into a custom namespace (e.g. simple-time-service)
 kubectl create namespace simple-time-service
 helm install simple-time-service charts/simple-time-service --namespace simple-time-service
 ```
@@ -350,6 +348,11 @@ helm upgrade simple-time-service charts/simple-time-service
 ### Verify the deployment
 
 ```bash
+# Default namespace
+kubectl rollout status deployment/simple-time-service
+kubectl get pods -l app.kubernetes.io/name=simple-time-service
+
+# Custom namespace
 kubectl rollout status deployment/simple-time-service -n simple-time-service
 kubectl get pods -n simple-time-service -l app.kubernetes.io/name=simple-time-service
 ```
@@ -357,14 +360,24 @@ kubectl get pods -n simple-time-service -l app.kubernetes.io/name=simple-time-se
 ### Access the service
 
 ```bash
+# Default namespace
+kubectl port-forward svc/simple-time-service 8080:80
+
+# Custom namespace
 kubectl port-forward svc/simple-time-service -n simple-time-service 8080:80
+
 curl http://127.0.0.1:8080/
 ```
 
 ### Uninstall
 
 ```bash
+# Default namespace
 helm uninstall simple-time-service
+
+# Custom namespace
+helm uninstall simple-time-service --namespace simple-time-service
+kubectl delete namespace simple-time-service
 ```
 
 ### Chart values
@@ -401,6 +414,7 @@ All values can be overridden with `--set key=value` or a custom values file (`-f
 | `serviceAccount.create` | `false` | Create a dedicated ServiceAccount |
 | `serviceAccount.name` | `""` | ServiceAccount name (if not auto-generated) |
 | `serviceAccount.annotations` | `{}` | Annotations for the ServiceAccount |
+| `networkPolicy.enabled` | `false` | Create a NetworkPolicy restricting ingress and egress |
 | `hpa.enabled` | `false` | Create a HorizontalPodAutoscaler (requires `metrics-server`) |
 | `hpa.minReplicas` | `2` | Minimum number of replicas |
 | `hpa.maxReplicas` | `10` | Maximum number of replicas |
@@ -766,7 +780,7 @@ curl http://localhost:8080/metrics | grep http_requests_total
 
 ```bash
 kubectl apply -f k8s/microservice.yaml
-kubectl port-forward svc/simple-time-service -n simple-time-service 8080:80
+kubectl port-forward svc/simple-time-service 8080:80
 curl http://localhost:8080/
 ```
 
@@ -818,13 +832,13 @@ kubectl apply -f k8s/microservice.yaml
 
 ```bash
 # Wait for pods to become ready
-kubectl rollout status deployment/simple-time-service -n simple-time-service
+kubectl rollout status deployment/simple-time-service
 
 # Check pods
-kubectl get pods -n simple-time-service -l app=simple-time-service -w
+kubectl get pods -l app=simple-time-service -w
 
 # Check the service
-kubectl get svc simple-time-service -n simple-time-service
+kubectl get svc simple-time-service
 ```
 
 ## Deployment validation
@@ -840,7 +854,7 @@ The application is considered successfully deployed when:
 Because the Service type is `ClusterIP`, use `kubectl port-forward` to reach it from your local machine:
 
 ```bash
-kubectl port-forward svc/simple-time-service -n simple-time-service 8080:80
+kubectl port-forward svc/simple-time-service 8080:80
 ```
 
 Then in a second terminal:
@@ -951,8 +965,10 @@ kubectl delete namespace argocd
 ### 3 - Remove the Helm release (if deployed outside ArgoCD)
 
 ```bash
+# If installed into the default namespace:
 helm uninstall simple-time-service
-# If installed in a custom namespace:
+
+# If installed into a custom namespace (e.g. simple-time-service):
 helm uninstall simple-time-service --namespace simple-time-service
 kubectl delete namespace simple-time-service
 ```
@@ -976,6 +992,29 @@ This removes all AWS resources (VPC, EKS cluster, node group, NAT Gateway, IAM r
 > ```bash
 > aws s3 rb s3://<your-bucket-name> --force
 > ```
+
+---
+
+## NetworkPolicy
+
+The Helm chart includes an optional NetworkPolicy (`charts/simple-time-service/templates/networkpolicy.yaml`). It is **disabled by default** in `values.yaml` and enabled via the ArgoCD ApplicationSet override.
+
+When enabled, it applies a default-deny posture and then opens only the minimum required traffic:
+
+| Direction | Allowed | Reason |
+|-----------|---------|--------|
+| Ingress | Port 8080 from any pod in the same namespace | Pod-to-pod traffic within `simple-time-service` |
+| Ingress | Port 8080 from the `monitoring` namespace | Prometheus scraping via ServiceMonitor |
+| Egress | Port 53 UDP/TCP | DNS resolution |
+| Everything else | Denied | The app makes no outbound calls |
+
+> **CNI requirement:** NetworkPolicy enforcement requires a CNI plugin that supports it. The Terraform EKS module in this repo enables the VPC CNI Network Policy controller via `enableNetworkPolicy: "true"` in the `vpc-cni` add-on configuration (`terraform/modules/eks/main.tf`) - no extra steps needed.
+
+Verify the policy after ArgoCD syncs:
+
+```bash
+kubectl get networkpolicy -n simple-time-service
+```
 
 ---
 
