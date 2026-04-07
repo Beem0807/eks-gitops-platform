@@ -1,0 +1,130 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: grafana-dashboards
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - clusters: {}
+  template:
+    metadata:
+      name: 'grafana-dashboards-{{.nameNormalized}}'
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/Beem0807/eks-gitops-platform.git
+        targetRevision: main
+        path: charts/raw
+        helm:
+          releaseName: grafana-dashboards
+          values: |
+            resources:
+              - apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: simple-time-service-dashboard
+                  namespace: monitoring
+                  annotations:
+                    argocd.argoproj.io/sync-wave: "2"
+                  labels:
+                    grafana_dashboard: "1"
+                data:
+                  simple-time-service.json: |
+                    {
+                      "title": "Simple Time Service",
+                      "uid": "simple-time-service",
+                      "timezone": "browser",
+                      "refresh": "30s",
+                      "schemaVersion": 38,
+                      "panels": [
+                        {
+                          "id": 1,
+                          "title": "Request Rate",
+                          "type": "timeseries",
+                          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+                          "targets": [
+                            {
+                              "expr": "sum by(status) (rate(http_request_duration_seconds_count{job=~\".*simple-time-service.*\"}[5m]))",
+                              "legendFormat": "{{ `{{` }} status {{ `}}` }}",
+                              "refId": "A"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": { "unit": "reqps" }
+                          }
+                        },
+                        {
+                          "id": 2,
+                          "title": "Latency",
+                          "type": "timeseries",
+                          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+                          "targets": [
+                            {
+                              "expr": "histogram_quantile(0.50, sum by(le) (rate(http_request_duration_seconds_bucket{job=~\".*simple-time-service.*\"}[5m])))",
+                              "legendFormat": "p50",
+                              "refId": "A"
+                            },
+                            {
+                              "expr": "histogram_quantile(0.95, sum by(le) (rate(http_request_duration_seconds_bucket{job=~\".*simple-time-service.*\"}[5m])))",
+                              "legendFormat": "p95",
+                              "refId": "B"
+                            },
+                            {
+                              "expr": "histogram_quantile(0.99, sum by(le) (rate(http_request_duration_seconds_bucket{job=~\".*simple-time-service.*\"}[5m])))",
+                              "legendFormat": "p99",
+                              "refId": "C"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": { "unit": "s" }
+                          }
+                        },
+                        {
+                          "id": 3,
+                          "title": "Request Activity",
+                          "type": "timeseries",
+                          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+                          "targets": [
+                            {
+                              "expr": "sum(rate(http_request_duration_seconds_count{job=~\".*simple-time-service.*\"}[1m]))",
+                              "legendFormat": "req/sec",
+                              "refId": "A"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": { "unit": "reqps" }
+                          }
+                        },
+                        {
+                          "id": 4,
+                          "title": "Replica Count",
+                          "type": "stat",
+                          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+                          "targets": [
+                            {
+                              "expr": "kube_deployment_status_replicas_available{namespace=\"simple-time-service\", deployment=\"simple-time-service\"}",
+                              "legendFormat": "available",
+                              "refId": "A"
+                            }
+                          ],
+                          "options": {
+                            "reduceOptions": { "calcs": ["lastNotNull"] }
+                          },
+                          "fieldConfig": {
+                            "defaults": { "unit": "short" }
+                          }
+                        }
+                      ]
+                    }
+      destination:
+        server: '{{.server}}'
+        namespace: monitoring
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true

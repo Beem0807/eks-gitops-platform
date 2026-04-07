@@ -1,12 +1,13 @@
 # EKS GitOps Platform
 
-This repository contains five components:
+This repository contains six components:
 
 1. **SimpleTimeService** - a minimal Python microservice containerized with Docker and deployable to Kubernetes.
 2. **Terraform infrastructure** - an AWS VPC and EKS cluster provisioned with Terraform.
 3. **GitOps platform** - ArgoCD running on the EKS cluster, managing deployments via the App of Apps pattern.
-4. **Monitoring** - Prometheus and Grafana deployed via ArgoCD using the `kube-prometheus-stack` Helm chart.
+4. **Monitoring** - Prometheus and Grafana deployed via ArgoCD using the `kube-prometheus-stack` Helm chart, with a pre-built Grafana dashboard for SimpleTimeService auto-provisioned via the `charts/raw` generic Helm chart.
 5. **Autoscaling** - `metrics-server` deployed via ArgoCD enabling HPA-based horizontal pod autoscaling for SimpleTimeService.
+6. **Generic Helm chart** - a reusable `charts/raw` chart for deploying arbitrary Kubernetes resources through the same ApplicationSet pattern used by the rest of the platform.
 
 > **Naming note:** The application is called SimpleTimeService. Its source code lives under `sample-workload/`, the raw Kubernetes manifest is in `k8s/microservice.yaml`, and the Helm release name is `simple-time-service`. These names refer to the same service.
 
@@ -31,7 +32,7 @@ kubectl apply -f gitops/bootstrap/root-app.yaml
 
 # 5. Verify applications in ArgoCD
 kubectl port-forward svc/argocd-server -n argocd 8080:443
-# Open https://localhost:8080 - simple-time-service, prometheus, and metrics-server apps should appear
+# Open https://localhost:8080 - simple-time-service, prometheus, metrics-server, and grafana-dashboards apps should appear
 
 # 6. Verify the service
 kubectl port-forward svc/simple-time-service -n simple-time-service 8080:80
@@ -83,16 +84,22 @@ The service is containerized with Docker and runs as a non-root user. It can be 
 ├── compose.yaml                   # Docker Compose for local development
 ├── gitops/
 │   ├── bootstrap/
-│   │   └── root-app.yaml          # ArgoCD root Application (App of Apps bootstrap)
+│   │   └── root-app.yaml                    # ArgoCD root Application (App of Apps bootstrap)
 │   ├── app/
-│   │   └── simple-time-service.yaml  # ArgoCD ApplicationSet (multi-cluster Helm deploy)
+│   │   └── simple-time-service.yaml         # ArgoCD ApplicationSet (multi-cluster Helm deploy)
 │   ├── prometheus/
-│   │   └── prometheus.yaml         # ArgoCD ApplicationSet - kube-prometheus-stack (Prometheus + Grafana + Alertmanager)
-│   └── metrics-server/
-│       └── metrics-server.yaml     # ArgoCD Application - metrics-server (required for HPA)
+│   │   └── prometheus.yaml                  # ArgoCD ApplicationSet - kube-prometheus-stack (Prometheus + Grafana + Alertmanager)
+│   ├── metrics-server/
+│   │   └── metrics-server.yaml              # ArgoCD ApplicationSet - metrics-server (required for HPA)
+│   └── grafana/
+│       └── simple-time-service-dashboard.yaml  # ArgoCD ApplicationSet - Grafana dashboard via charts/raw
 ├── k8s/
 │   └── microservice.yaml          # Kubernetes Deployment + ClusterIP Service
 ├── charts/
+│   ├── raw/                       # Generic Helm chart - deploy any Kubernetes resource via .Values.resources list
+│   │   ├── Chart.yaml
+│   │   └── templates/
+│   │       └── resources.yaml
 │   └── simple-time-service/       # Helm chart for the microservice
 │       ├── Chart.yaml
 │       ├── values.yaml
@@ -455,6 +462,47 @@ helm install simple-time-service charts/simple-time-service \
 
 ---
 
+## Generic Helm chart (`charts/raw`)
+
+The `charts/raw` chart is a minimal, reusable chart that renders any list of Kubernetes resources passed in via `values.yaml`. It is modelled after the [Helm incubator `raw` chart](https://github.com/helm/charts/tree/master/incubator/raw) and exists so that every resource in the platform — including plain ConfigMaps — can be deployed through the same ApplicationSet pattern without needing a separate raw manifest in `gitops/`.
+
+### How it works
+
+`charts/raw/templates/resources.yaml` loops over `.Values.resources` and renders each entry as a YAML document:
+
+```yaml
+{{- range .Values.resources }}
+---
+{{ toYaml . }}
+{{- end }}
+```
+
+Anything that is valid Kubernetes YAML can be placed in the `resources:` list.
+
+### Usage
+
+Reference `charts/raw` as the Helm source in any ApplicationSet:
+
+```yaml
+source:
+  repoURL: https://github.com/Beem0807/eks-gitops-platform.git
+  targetRevision: main
+  path: charts/raw
+  helm:
+    releaseName: my-release
+    values: |
+      resources:
+        - apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: my-config
+            namespace: some-namespace
+          data:
+            key: value
+```
+
+---
+
 ## GitOps - ArgoCD
 
 The `gitops/` directory implements the **App of Apps** pattern: a single root Application bootstraps ArgoCD, which then discovers and reconciles all other applications declared in the repo.
@@ -462,13 +510,15 @@ The `gitops/` directory implements the **App of Apps** pattern: a single root Ap
 ```
 gitops/
 ├── bootstrap/
-│   └── root-app.yaml          # Root Application - watches gitops/ recursively
+│   └── root-app.yaml                    # Root Application - watches gitops/ recursively
 ├── app/
-│   └── simple-time-service.yaml  # ApplicationSet - deploys Helm chart to each registered cluster
+│   └── simple-time-service.yaml         # ApplicationSet - deploys Helm chart to each registered cluster
 ├── prometheus/
-│   └── prometheus.yaml         # ApplicationSet - kube-prometheus-stack (Prometheus + Grafana + Alertmanager)
-└── metrics-server/
-    └── metrics-server.yaml     # Application - metrics-server (required for HPA)
+│   └── prometheus.yaml                  # ApplicationSet - kube-prometheus-stack (Prometheus + Grafana + Alertmanager)
+├── metrics-server/
+│   └── metrics-server.yaml              # ApplicationSet - metrics-server (required for HPA)
+└── grafana/
+    └── simple-time-service-dashboard.yaml  # ApplicationSet - Grafana dashboard ConfigMap via charts/raw
 ```
 
 ### How it works
@@ -480,7 +530,8 @@ gitops/
      enabled: true
    ```
 3. **Prometheus ApplicationSet** (`gitops/prometheus/prometheus.yaml`) - discovered automatically by the root app. Deploys the `kube-prometheus-stack` Helm chart to every registered cluster, providing Prometheus, Grafana, and Alertmanager in the `monitoring` namespace.
-4. **metrics-server Application** (`gitops/metrics-server/metrics-server.yaml`) - discovered automatically by the root app. Deploys `metrics-server` into `kube-system`, which is a prerequisite for the Kubernetes HPA to collect CPU/memory utilization data.
+4. **metrics-server ApplicationSet** (`gitops/metrics-server/metrics-server.yaml`) - discovered automatically by the root app. Deploys `metrics-server` into `kube-system` on every registered cluster, which is a prerequisite for the Kubernetes HPA to collect CPU/memory utilization data.
+5. **grafana-dashboards ApplicationSet** (`gitops/grafana/simple-time-service-dashboard.yaml`) - discovered automatically by the root app. Uses the generic `charts/raw` Helm chart to deploy a Grafana dashboard ConfigMap into the `monitoring` namespace on every registered cluster. The ConfigMap carries the `grafana_dashboard: "1"` label so Grafana's sidecar auto-imports it. A sync-wave annotation (`argocd.argoproj.io/sync-wave: "2"`) ensures this deploys after the `monitoring` namespace exists.
 
 After bootstrap, changes merged to `main` are automatically picked up by ArgoCD and reconciled according to the configured sync policy.
 
@@ -728,6 +779,27 @@ kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 909
 ```
 
 Open [http://localhost:9090](http://localhost:9090) to query metrics directly.
+
+### SimpleTimeService Grafana dashboard
+
+A pre-built dashboard is automatically provisioned into Grafana via the `gitops/grafana/simple-time-service-dashboard.yaml` ApplicationSet. It uses the generic `charts/raw` Helm chart to deploy a ConfigMap with label `grafana_dashboard: "1"` into the `monitoring` namespace. Grafana's sidecar detects the label and imports the dashboard without any manual steps.
+
+The dashboard contains four panels:
+
+| Panel | Query | Unit |
+|-------|-------|------|
+| Request Rate | `rate(http_request_duration_seconds_count[5m])` broken down by `status` | req/s |
+| Latency | `histogram_quantile` p50 / p95 / p99 on `http_request_duration_seconds_bucket` | seconds |
+| Request Activity | `sum(rate(http_request_duration_seconds_count{job=~".*simple-time-service.*"}[1m]))` | req/s |
+| Replica Count | `kube_deployment_status_replicas_available` | count (stat panel) |
+
+Although the app exposes `http_requests_inprogress`, the dashboard uses request rate for panel 3 because it provides a more reliable visualization under low traffic.
+
+The dashboard panels show **No data** until the ServiceMonitor is enabled and the service has received traffic. Panels populate automatically once metrics are flowing - no manual import or restart is needed.
+
+> To add more dashboards, append additional `ConfigMap` entries to the `resources:` list in `gitops/grafana/simple-time-service-dashboard.yaml`.
+
+---
 
 ### Verify the ServiceMonitor is working
 
