@@ -28,6 +28,9 @@ The service is containerized with Docker, runs as a non-root user, and can be de
 
 ```
 .
+├── .github/
+│   └── workflows/
+│       └── sample-workload-image.yaml  # CI — build and push Docker image to Docker Hub
 ├── compose.yaml                   # Docker Compose for local development
 ├── gitops/
 │   ├── bootstrap/
@@ -577,18 +580,50 @@ curl http://localhost:8080/
 
 ---
 
+## CI — GitHub Actions
+
+The workflow at `.github/workflows/sample-workload-image.yaml` automatically builds and pushes the Docker image to Docker Hub.
+
+### Triggers
+
+| Event | Condition | Behaviour |
+|-------|-----------|-----------|
+| Push to `main` | Files under `sample-workload/**` or the workflow file changed | Build + push |
+| Pull request | Same path filter | Build only (no push) |
+| `workflow_dispatch` | Manual trigger from the Actions UI | Build + push |
+
+### Tagging strategy
+
+| Tag | When applied |
+|-----|-------------|
+| Short commit SHA (e.g. `a1b2c3d`) | Every build |
+| `latest` | Push to `main` only |
+
+### Required secrets
+
+Before the workflow can push to Docker Hub, add these two secrets to the repository (**Settings → Secrets and variables → Actions → New repository secret**):
+
+| Secret | Value |
+|--------|-------|
+| `DOCKERHUB_USERNAME` | Your Docker Hub username |
+| `DOCKERHUB_TOKEN` | A Docker Hub access token (not your password) |
+
+Generate a token at **Docker Hub → Account Settings → Personal access tokens**.
+
+---
+
 ## Docker image
 
 The public image is published on DockerHub:
 
 ```
-docker.io/nabeemdev/simple-time-service:v1
+docker.io/nabeemdev/simple-time-service:latest
 ```
 
 Pull it directly:
 
 ```bash
-docker pull nabeemdev/simple-time-service:v1
+docker pull nabeemdev/simple-time-service:latest
 ```
 
 ### Building and pushing your own image
@@ -598,7 +633,7 @@ The image is built as a **multi-platform manifest** targeting both `linux/amd64`
 ```bash
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  -t <your-dockerhub-username>/simple-time-service:v1 \
+  -t <your-dockerhub-username>/simple-time-service:latest \
   --push ./sample-workload
 ```
 
@@ -609,12 +644,12 @@ docker buildx build \
 - Works out of the box on Apple Silicon (M-series) development machines
 - Docker automatically pulls the correct variant for the host architecture
 
-> Requires `docker buildx` (included in Docker Desktop). For CI, ensure the builder has `--platform linux/amd64,linux/arm64` support (e.g. QEMU or native multi-arch runners).
+> Requires `docker buildx` (included in Docker Desktop). The CI workflow handles this automatically via QEMU — see the [GitHub Actions](#ci--github-actions) section.
 
 Then update the `image:` field in `k8s/microservice.yaml` before applying:
 
 ```yaml
-image: docker.io/<your-dockerhub-username>/simple-time-service:v1
+image: docker.io/<your-dockerhub-username>/simple-time-service:latest
 ```
 
 ## Cleanup
