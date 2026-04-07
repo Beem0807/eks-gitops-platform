@@ -30,6 +30,17 @@ The service is containerized with Docker, runs as a non-root user, and can be de
 ├── compose.yaml                   # Docker Compose for local development
 ├── k8s/
 │   └── microservice.yaml          # Kubernetes Deployment + ClusterIP Service
+├── charts/
+│   └── simple-time-service/       # Helm chart for the microservice
+│       ├── Chart.yaml
+│       ├── values.yaml
+│       └── templates/
+│           ├── _helpers.tpl
+│           ├── deployment.yaml
+│           ├── service.yaml
+│           ├── serviceaccount.yaml
+│           ├── pdb.yaml
+│           └── NOTES.txt
 ├── sample-workload/
 │   ├── Dockerfile
 │   ├── requirements.txt
@@ -238,7 +249,110 @@ This removes all AWS resources created by Terraform. Confirm with `yes` when pro
 
 ---
 
-## Microservice — Quick Start
+## Helm Chart
+
+The chart at `charts/simple-time-service/` is the recommended way to deploy the service to Kubernetes. It provides configurable replicas, resource limits, health probes, a PodDisruptionBudget, and a full set of security-context defaults — all tuneable through `values.yaml`.
+
+### Prerequisites
+
+| Tool | Purpose |
+|------|---------|
+| [Helm](https://helm.sh/docs/intro/install/) `>= 3` | Package manager for Kubernetes |
+| A running Kubernetes cluster | Deployment target |
+
+### Install
+
+```bash
+# From the repository root
+helm install simple-time-service charts/simple-time-service
+```
+
+To install into a specific namespace:
+
+```bash
+kubectl create namespace simple-time-service
+helm install simple-time-service charts/simple-time-service --namespace simple-time-service
+```
+
+### Upgrade
+
+```bash
+helm upgrade simple-time-service charts/simple-time-service
+```
+
+### Verify the deployment
+
+```bash
+kubectl rollout status deployment/simple-time-service
+kubectl get pods -l app.kubernetes.io/name=simple-time-service
+```
+
+### Access the service
+
+```bash
+kubectl port-forward svc/simple-time-service 8080:80
+curl http://127.0.0.1:8080/
+```
+
+### Uninstall
+
+```bash
+helm uninstall simple-time-service
+```
+
+### Chart values
+
+All values can be overridden with `--set key=value` or a custom values file (`-f my-values.yaml`).
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `fullnameOverride` | `simple-time-service` | Override the full resource name |
+| `replicaCount` | `2` | Number of pod replicas |
+| `image.repository` | `docker.io/nabeemdev/simple-time-service` | Container image repository |
+| `image.tag` | `v1` | Image tag |
+| `image.pullPolicy` | `IfNotPresent` | Image pull policy |
+| `service.type` | `ClusterIP` | Kubernetes Service type |
+| `service.port` | `80` | Service port |
+| `service.targetPort` | `8080` | Container port |
+| `resources.requests.cpu` | `100m` | CPU request |
+| `resources.requests.memory` | `128Mi` | Memory request |
+| `resources.limits.cpu` | `250m` | CPU limit |
+| `resources.limits.memory` | `256Mi` | Memory limit |
+| `livenessProbe.path` | `/health` | Liveness probe HTTP path |
+| `livenessProbe.initialDelaySeconds` | `5` | Liveness probe initial delay |
+| `livenessProbe.periodSeconds` | `10` | Liveness probe interval |
+| `readinessProbe.path` | `/health` | Readiness probe HTTP path |
+| `readinessProbe.initialDelaySeconds` | `3` | Readiness probe initial delay |
+| `readinessProbe.periodSeconds` | `5` | Readiness probe interval |
+| `podSecurityContext.runAsNonRoot` | `true` | Enforce non-root at pod level |
+| `podSecurityContext.runAsUser` | `10001` | UID for the container process |
+| `podSecurityContext.runAsGroup` | `10001` | GID for the container process |
+| `podSecurityContext.fsGroup` | `10001` | GID for volume mounts |
+| `securityContext.allowPrivilegeEscalation` | `false` | Prevent privilege escalation |
+| `securityContext.readOnlyRootFilesystem` | `true` | Read-only root filesystem |
+| `securityContext.capabilities.drop` | `["ALL"]` | Drop all Linux capabilities |
+| `serviceAccount.create` | `false` | Create a dedicated ServiceAccount |
+| `serviceAccount.name` | `""` | ServiceAccount name (if not auto-generated) |
+| `serviceAccount.annotations` | `{}` | Annotations for the ServiceAccount |
+| `pdb.enabled` | `true` | Create a PodDisruptionBudget |
+| `pdb.minAvailable` | `1` | Minimum pods available during disruptions |
+| `podAnnotations` | `{}` | Extra pod annotations |
+| `nodeSelector` | `{}` | Node selector constraints |
+| `tolerations` | `[]` | Pod tolerations |
+| `affinity` | `{}` | Pod affinity/anti-affinity rules |
+
+### Example — custom image and 3 replicas
+
+```bash
+helm install simple-time-service charts/simple-time-service \
+  --set image.repository=docker.io/myuser/simple-time-service \
+  --set image.tag=v2 \
+  --set replicaCount=3
+```
+
+---
+
+## Microservice — Quick Start (raw manifests)
 
 ```bash
 kubectl apply -f k8s/microservice.yaml
@@ -397,5 +511,5 @@ kubectl delete -f k8s/microservice.yaml
 
 - **Runtime**: Python 3.12 (slim base image)
 - **Framework**: FastAPI + Uvicorn
-- **Container**: multi-stage-free single-stage build kept small via `python:3.12-slim` and pip cache clearing
+- **Container**: single-stage build based on python:3.12-slim, kept small by clearing pip cache.
 - **ASGI server**: Uvicorn (production-grade async Python server)

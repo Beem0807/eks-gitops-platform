@@ -1,0 +1,7 @@
+1. Get the application port-forwarded:
+
+  kubectl port-forward svc/{{ include "simple-time-service.fullname" . }} 8080:{{ .Values.service.port }}
+
+2. Open:
+
+  http://127.0.0.1:8080/
