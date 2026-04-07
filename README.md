@@ -1,9 +1,10 @@
 # EKS GitOps Platform
 
-This repository contains two components:
+This repository contains three components:
 
 1. **SimpleTimeService** — a minimal Python microservice containerized with Docker and deployable to Kubernetes.
 2. **Terraform infrastructure** — an AWS VPC and EKS cluster provisioned with Terraform.
+3. **GitOps platform** — ArgoCD running on the EKS cluster, managing deployments via the App of Apps pattern.
 
 ---
 
@@ -28,6 +29,11 @@ The service is containerized with Docker, runs as a non-root user, and can be de
 ```
 .
 ├── compose.yaml                   # Docker Compose for local development
+├── gitops/
+│   ├── bootstrap/
+│   │   └── root-app.yaml          # ArgoCD root Application (App of Apps bootstrap)
+│   └── app/
+│       └── simple-time-service.yaml  # ArgoCD ApplicationSet (multi-cluster Helm deploy)
 ├── k8s/
 │   └── microservice.yaml          # Kubernetes Deployment + ClusterIP Service
 ├── charts/
@@ -349,6 +355,136 @@ helm install simple-time-service charts/simple-time-service \
   --set image.tag=v2 \
   --set replicaCount=3
 ```
+
+---
+
+## GitOps — ArgoCD
+
+The `gitops/` directory implements the **App of Apps** pattern: a single root Application bootstraps ArgoCD, which then discovers and reconciles all other applications declared in the repo.
+
+```
+gitops/
+├── bootstrap/
+│   └── root-app.yaml          # Root Application — watches gitops/ recursively
+└── app/
+    └── simple-time-service.yaml  # ApplicationSet — deploys Helm chart to each registered cluster
+```
+
+### How it works
+
+1. **Root Application** (`gitops/bootstrap/root-app.yaml`) — deployed manually once. It watches the entire `gitops/` directory recursively and creates any ArgoCD `Application` or `ApplicationSet` resources it finds there.
+2. **ApplicationSet** (`gitops/app/simple-time-service.yaml`) — discovered automatically by the root app. Uses the cluster generator to deploy the `charts/simple-time-service` Helm chart to every cluster registered in ArgoCD.
+
+From this point on, merging a change to `main` is all that is needed to trigger a reconciliation.
+
+---
+
+### Prerequisites
+
+| Tool | Purpose |
+|------|---------|
+| `kubectl` configured against the EKS cluster | Deploy and manage ArgoCD |
+| `argocd` CLI (optional) | Interact with ArgoCD from the terminal |
+
+---
+
+### 1 — Install ArgoCD on the cluster
+
+```bash
+kubectl create namespace argocd
+
+kubectl apply -n argocd \
+  -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+```
+
+Wait for all ArgoCD pods to become ready:
+
+```bash
+kubectl wait --for=condition=available --timeout=300s \
+  deployment/argocd-server -n argocd
+```
+
+---
+
+### 2 — Retrieve the initial admin password
+
+```bash
+kubectl -n argocd get secret argocd-initial-admin-secret \
+  -o jsonpath="{.data.password}" | base64 -d; echo
+```
+
+Save this password — you will need it to log in to the UI and/or CLI.
+
+---
+
+### 3 — Deploy the root Application (bootstrap)
+
+Apply the root app manifest once. This is the only manual deployment step:
+
+```bash
+kubectl apply -f gitops/bootstrap/root-app.yaml
+```
+
+ArgoCD immediately begins reconciling the `gitops/` directory. Within a few seconds it discovers `gitops/app/simple-time-service.yaml` and creates the `ApplicationSet`, which in turn provisions the `simple-time-service` application on every registered cluster.
+
+---
+
+### 4 — Access the ArgoCD UI
+
+Port-forward the ArgoCD server to your local machine:
+
+```bash
+kubectl port-forward svc/argocd-server -n argocd 8080:443
+```
+
+Open [https://localhost:8080](https://localhost:8080) in your browser. Accept the self-signed certificate warning and log in with username `admin` and the password retrieved in step 2.
+
+> The UI shows all applications and their sync status. Click **Sync** on any application to trigger a manual reconciliation.
+
+---
+
+### 5 — Sync the application
+
+#### Via the UI
+
+1. Open [https://localhost:8080](https://localhost:8080) and log in.
+2. Click the **root-app** tile.
+3. Click **Sync → Synchronize**. ArgoCD pulls the latest state from `main` and applies any diff.
+4. Navigate back to the application list — the `simple-time-service` ApplicationSet and its child application should appear as **Synced / Healthy**.
+
+#### Via the ArgoCD CLI
+
+```bash
+# Log in (keep port-forward running in another terminal)
+argocd login localhost:8080 \
+  --username admin \
+  --password <password> \
+  --insecure
+
+# Sync the root app (triggers discovery of all child apps)
+argocd app sync root-app
+
+# Sync the service application directly
+argocd app sync simple-time-service-in-cluster
+
+# Watch live status
+argocd app get simple-time-service-in-cluster
+```
+
+---
+
+### Sync policy
+
+The root Application is configured with **automated sync, pruning, and self-healing**:
+
+```yaml
+syncPolicy:
+  automated:
+    prune: true      # delete resources removed from Git
+    selfHeal: true   # revert any manual changes made directly in the cluster
+```
+
+Any `git push` to `main` that modifies files under `gitops/` or `charts/` will be automatically detected and applied within the default ArgoCD polling interval (3 minutes). Manual syncs via the UI or CLI take effect immediately.
 
 ---
 
