@@ -1,17 +1,65 @@
 # EKS GitOps Platform
 
-This repository contains three components:
+This repository contains four components:
 
-1. **SimpleTimeService** — a minimal Python microservice containerized with Docker and deployable to Kubernetes.
-2. **Terraform infrastructure** — an AWS VPC and EKS cluster provisioned with Terraform.
-3. **GitOps platform** — ArgoCD running on the EKS cluster, managing deployments via the App of Apps pattern.
+1. **SimpleTimeService** - a minimal Python microservice containerized with Docker and deployable to Kubernetes.
+2. **Terraform infrastructure** - an AWS VPC and EKS cluster provisioned with Terraform.
+3. **GitOps platform** - ArgoCD running on the EKS cluster, managing deployments via the App of Apps pattern.
+4. **Monitoring** - Prometheus and Grafana deployed via ArgoCD using the `kube-prometheus-stack` Helm chart.
+
+> **Naming note:** The application is called SimpleTimeService. Its source code lives under `sample-workload/`, the raw Kubernetes manifest is in `k8s/microservice.yaml`, and the Helm release name is `simple-time-service`. These names refer to the same service.
+
+---
+
+## Quick demo
+
+```bash
+# 1. Provision infrastructure
+cd terraform && terraform init && terraform apply
+
+# 2. Authenticate kubectl (use the same IAM identity that ran apply)
+aws eks update-kubeconfig --region ap-south-1 --name simple-eks
+
+# 3. Install ArgoCD
+kubectl create namespace argocd
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n argocd
+
+# 4. Bootstrap GitOps
+kubectl apply -f gitops/bootstrap/root-app.yaml
+
+# 5. Verify applications in ArgoCD
+kubectl port-forward svc/argocd-server -n argocd 8080:443
+# Open https://localhost:8080 - both simple-time-service and prometheus apps should appear
+
+# 6. Verify the service
+kubectl port-forward svc/simple-time-service 8080:80
+curl http://127.0.0.1:8080/
+
+# 7. Verify Grafana
+kubectl port-forward svc/prometheus-grafana -n monitoring 3000:80
+# Open http://localhost:3000
+```
+
+---
+
+## Assumptions and scope
+
+These choices are intentional for a demo environment:
+
+- Single NAT gateway to reduce cost (use one per AZ in production).
+- EKS API endpoint is publicly accessible - acceptable for demos; restrict `public_access_cidrs` in production.
+- No ingress controller is included; services are accessed via `kubectl port-forward`.
+- ArgoCD is installed manually once; everything else is GitOps-managed from that point.
+- Prometheus Operator TLS and admission webhooks are disabled to simplify bootstrap reliability.
+- `sample-workload/` folder name is kept as-is from the original task scaffolding.
 
 ---
 
 ## SimpleTimeService
 
 A minimal Python microservice that returns the current UTC timestamp and the caller's IP address as JSON.
-The service is containerized with Docker, runs as a non-root user, and can be deployed to Kubernetes using a single manifest.
+The service is containerized with Docker and runs as a non-root user. It can be deployed using a raw Kubernetes manifest (`k8s/microservice.yaml`) for a quick start, or via the Helm chart (`charts/simple-time-service/`) for a more configurable deployment aligned with production practices.
 
 ### Response format
 
@@ -30,13 +78,15 @@ The service is containerized with Docker, runs as a non-root user, and can be de
 .
 ├── .github/
 │   └── workflows/
-│       └── sample-workload-image.yaml  # CI — build and push Docker image to Docker Hub
+│       └── sample-workload-image.yaml  # CI - build and push Docker image to Docker Hub
 ├── compose.yaml                   # Docker Compose for local development
 ├── gitops/
 │   ├── bootstrap/
 │   │   └── root-app.yaml          # ArgoCD root Application (App of Apps bootstrap)
-│   └── app/
-│       └── simple-time-service.yaml  # ArgoCD ApplicationSet (multi-cluster Helm deploy)
+│   ├── app/
+│   │   └── simple-time-service.yaml  # ArgoCD ApplicationSet (multi-cluster Helm deploy)
+│   └── prometheus/
+│       └── prometheus.yaml         # ArgoCD ApplicationSet - kube-prometheus-stack (Prometheus + Grafana + Alertmanager)
 ├── k8s/
 │   └── microservice.yaml          # Kubernetes Deployment + ClusterIP Service
 ├── charts/
@@ -58,7 +108,7 @@ The service is containerized with Docker, runs as a non-root user, and can be de
 │       └── app.py
 └── terraform/                     # AWS infrastructure (VPC + EKS)
     ├── backend.tf                 # S3 remote state backend
-    ├── main.tf                    # Root module — wires VPC and EKS modules
+    ├── main.tf                    # Root module - wires VPC and EKS modules
     ├── variables.tf               # Input variable declarations
     ├── terraform.tfvars           # Default variable values
     ├── outputs.tf                 # Root-level outputs
@@ -96,19 +146,19 @@ The service is containerized with Docker, runs as a non-root user, and can be de
 
 ---
 
-## Terraform — AWS VPC and EKS cluster
+## Terraform - AWS VPC and EKS cluster
 
 ### What gets created
 
 | Resource | Details |
 |----------|---------|
 | VPC | CIDR `10.0.0.0/24`, spread across 2 Availability Zones |
-| Public subnets | 2 subnets (`10.0.0.0/26`, `10.0.0.64/26`) — tagged for external load balancers |
-| Private subnets | 2 subnets (`10.0.0.128/26`, `10.0.0.192/26`) — tagged for internal load balancers |
+| Public subnets | 2 subnets (`10.0.0.0/26`, `10.0.0.64/26`) - tagged for external load balancers |
+| Private subnets | 2 subnets (`10.0.0.128/26`, `10.0.0.192/26`) - tagged for internal load balancers |
 | NAT Gateway | Single NAT gateway so private-subnet nodes can reach the internet |
-| EKS cluster | Kubernetes 1.33, API endpoint publicly accessible (no CIDR restriction — acceptable for demos, but restrict `public_access_cidrs` in production) |
+| EKS cluster | Kubernetes 1.33, API endpoint publicly accessible (no CIDR restriction - acceptable for demos, but restrict `public_access_cidrs` in production) |
 | Managed node group | `node_desired_size` × `m6a.large` on-demand nodes placed on private subnets only |
-| EKS add-ons | `coredns`, `kube-proxy`, `vpc-cni` (latest versions) |
+| EKS add-ons | `coredns`, `kube-proxy`, `vpc-cni` managed by the EKS module |
 
 The EKS module used is [`terraform-aws-modules/eks/aws`](https://registry.terraform.io/modules/terraform-aws-modules/eks/aws/latest) and the VPC module is [`terraform-aws-modules/vpc/aws`](https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws/latest).
 
@@ -118,7 +168,7 @@ The EKS module used is [`terraform-aws-modules/eks/aws`](https://registry.terraf
 
 **Never commit AWS credentials to the repository.** Use one of the following approaches:
 
-#### Option 1 — AWS CLI named profile (recommended for local use)
+#### Option 1 - AWS CLI named profile (recommended for local use)
 
 ```bash
 # Configure a profile (interactive)
@@ -128,7 +178,7 @@ aws configure --profile my-profile
 export AWS_PROFILE=my-profile
 ```
 
-#### Option 2 — Environment variables
+#### Option 2 - Environment variables
 
 ```bash
 export AWS_ACCESS_KEY_ID="AKIA..."
@@ -136,7 +186,7 @@ export AWS_SECRET_ACCESS_KEY="..."
 export AWS_DEFAULT_REGION="ap-south-1"
 ```
 
-#### Option 3 — IAM role / instance profile
+#### Option 3 - IAM role / instance profile
 
 If deploying from an EC2 instance, ECS task, GitHub Actions OIDC, or any other role-based environment, ensure the execution role has sufficient permissions and no static credentials are required.
 
@@ -146,11 +196,13 @@ The IAM principal used by Terraform needs permissions to create and manage: VPC 
 
 A convenient starting point is the AWS managed policies `AmazonEKSClusterPolicy` and `AmazonEKSWorkerNodePolicy` combined with VPC and IAM write permissions. For production use, scope these down to the minimum required.
 
+> **S3 backend note:** If you are using the S3 remote state backend (`backend.tf`), the Terraform principal also needs S3 permissions on the state bucket: `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject`, and `s3:ListBucket`. If native S3 state locking is enabled (`use_lockfile = true`), no additional DynamoDB permissions are required.
+
 ---
 
 ### Remote state backend
 
-The project is configured to store Terraform state in an S3 bucket (`backend.tf`). State locking is handled natively by S3 (via conditional writes) as of Terraform 1.10 — no DynamoDB table is required.
+The project stores Terraform state remotely in an S3 bucket (`backend.tf`). Native S3 state locking is enabled with `use_lockfile = true` (supported from Terraform 1.10). DynamoDB-based locking for the S3 backend is deprecated.
 
 Before running `terraform init` for the first time, either:
 
@@ -177,14 +229,14 @@ cd terraform
 # Download providers and modules
 terraform init
 
-# Preview changes — no AWS resources are created yet
+# Preview changes - no AWS resources are created yet
 terraform plan
 
 # Create the VPC and EKS cluster
 terraform apply
 ```
 
-`terraform plan` and `terraform apply` are the only commands needed. Type `yes` when prompted by `apply`.
+`terraform plan` previews changes; `terraform apply` provisions them. Confirm with `yes` when prompted.
 
 #### Typical apply time
 
@@ -214,7 +266,7 @@ To deploy in a different region, update `aws_region` and the `azs` list accordin
 
 ---
 
-### Cluster access — creator gets admin by default
+### Cluster access - creator gets admin by default
 
 The EKS module is configured with `enable_cluster_creator_admin_permissions = true` ([terraform/modules/eks/main.tf](terraform/modules/eks/main.tf)). This means the AWS IAM identity (user or role) that runs `terraform apply` is automatically granted `system:masters` access to the cluster, giving it full cluster-admin privileges with no additional RBAC setup required.
 
@@ -260,7 +312,9 @@ This removes all AWS resources created by Terraform. Confirm with `yes` when pro
 
 ## Helm Chart
 
-The chart at `charts/simple-time-service/` is the recommended way to deploy the service to Kubernetes. It provides configurable replicas, resource limits, health probes, a PodDisruptionBudget, and a full set of security-context defaults — all tuneable through `values.yaml`.
+The chart at `charts/simple-time-service/` is the recommended way to deploy the service to Kubernetes. It provides configurable replicas, resource limits, health probes, a PodDisruptionBudget, and a full set of security-context defaults - all tuneable through `values.yaml`.
+
+> The raw manifest at `k8s/microservice.yaml` is a minimal alternative for quickly testing the service. The Helm chart is the production-style deployment used by ArgoCD in this platform.
 
 ### Prerequisites
 
@@ -350,7 +404,7 @@ All values can be overridden with `--set key=value` or a custom values file (`-f
 | `tolerations` | `[]` | Pod tolerations |
 | `affinity` | `{}` | Pod affinity/anti-affinity rules |
 
-### Example — custom image and 3 replicas
+### Example - custom image and 3 replicas
 
 ```bash
 helm install simple-time-service charts/simple-time-service \
@@ -361,24 +415,27 @@ helm install simple-time-service charts/simple-time-service \
 
 ---
 
-## GitOps — ArgoCD
+## GitOps - ArgoCD
 
 The `gitops/` directory implements the **App of Apps** pattern: a single root Application bootstraps ArgoCD, which then discovers and reconciles all other applications declared in the repo.
 
 ```
 gitops/
 ├── bootstrap/
-│   └── root-app.yaml          # Root Application — watches gitops/ recursively
-└── app/
-    └── simple-time-service.yaml  # ApplicationSet — deploys Helm chart to each registered cluster
+│   └── root-app.yaml          # Root Application - watches gitops/ recursively
+├── app/
+│   └── simple-time-service.yaml  # ApplicationSet - deploys Helm chart to each registered cluster
+└── prometheus/
+    └── prometheus.yaml         # ApplicationSet - kube-prometheus-stack (Prometheus + Grafana + Alertmanager)
 ```
 
 ### How it works
 
-1. **Root Application** (`gitops/bootstrap/root-app.yaml`) — deployed manually once. It watches the entire `gitops/` directory recursively and creates any ArgoCD `Application` or `ApplicationSet` resources it finds there.
-2. **ApplicationSet** (`gitops/app/simple-time-service.yaml`) — discovered automatically by the root app. Uses the cluster generator to deploy the `charts/simple-time-service` Helm chart to every cluster registered in ArgoCD.
+1. **Root Application** (`gitops/bootstrap/root-app.yaml`) - deployed manually once. It is configured to watch the `gitops/` directory and create `Application` or `ApplicationSet` resources declared within it.
+2. **ApplicationSet** (`gitops/app/simple-time-service.yaml`) - discovered automatically by the root app. Uses the cluster generator to deploy the `charts/simple-time-service` Helm chart to every cluster registered in ArgoCD.
+3. **Prometheus ApplicationSet** (`gitops/prometheus/prometheus.yaml`) - discovered automatically by the root app. Deploys the `kube-prometheus-stack` Helm chart to every registered cluster, providing Prometheus, Grafana, and Alertmanager in the `monitoring` namespace.
 
-From this point on, merging a change to `main` is all that is needed to trigger a reconciliation.
+After bootstrap, changes merged to `main` are automatically picked up by ArgoCD and reconciled according to the configured sync policy.
 
 ---
 
@@ -391,7 +448,7 @@ From this point on, merging a change to `main` is all that is needed to trigger 
 
 ---
 
-### 1 — Install ArgoCD on the cluster
+### 1 - Install ArgoCD on the cluster
 
 ```bash
 kubectl create namespace argocd
@@ -409,18 +466,18 @@ kubectl wait --for=condition=available --timeout=300s \
 
 ---
 
-### 2 — Retrieve the initial admin password
+### 2 - Retrieve the initial admin password
 
 ```bash
 kubectl -n argocd get secret argocd-initial-admin-secret \
   -o jsonpath="{.data.password}" | base64 -d; echo
 ```
 
-Save this password — you will need it to log in to the UI and/or CLI.
+Note this password - it is required to log in to the UI and CLI.
 
 ---
 
-### 3 — Deploy the root Application (bootstrap)
+### 3 - Deploy the root Application (bootstrap)
 
 Apply the root app manifest once. This is the only manual deployment step:
 
@@ -432,7 +489,7 @@ ArgoCD immediately begins reconciling the `gitops/` directory. Within a few seco
 
 ---
 
-### 4 — Access the ArgoCD UI
+### 4 - Access the ArgoCD UI
 
 Port-forward the ArgoCD server to your local machine:
 
@@ -440,20 +497,20 @@ Port-forward the ArgoCD server to your local machine:
 kubectl port-forward svc/argocd-server -n argocd 8080:443
 ```
 
-Open [https://localhost:8080](https://localhost:8080) in your browser. Accept the self-signed certificate warning and log in with username `admin` and the password retrieved in step 2.
+Open [https://localhost:8080](https://localhost:8080) in your browser (the server uses a self-signed certificate). Log in with username `admin` and the password retrieved in step 2.
 
 > The UI shows all applications and their sync status. Click **Sync** on any application to trigger a manual reconciliation.
 
 ---
 
-### 5 — Sync the application
+### 5 - Sync the application
 
 #### Via the UI
 
 1. Open [https://localhost:8080](https://localhost:8080) and log in.
 2. Click the **root-app** tile.
 3. Click **Sync → Synchronize**. ArgoCD pulls the latest state from `main` and applies any diff.
-4. Navigate back to the application list — the `simple-time-service` ApplicationSet and its child application should appear as **Synced / Healthy**.
+4. Navigate back to the application list - the `simple-time-service` ApplicationSet and its child application should appear as **Synced / Healthy**.
 
 #### Via the ArgoCD CLI
 
@@ -491,7 +548,69 @@ Any `git push` to `main` that modifies files under `gitops/` or `charts/` will b
 
 ---
 
-## Microservice — Quick Start (raw manifests)
+## Monitoring - Prometheus, Grafana, and Alertmanager
+
+The `gitops/prometheus/prometheus.yaml` ApplicationSet deploys the [`kube-prometheus-stack`](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack) Helm chart to every cluster registered in ArgoCD.
+
+### What gets deployed
+
+| Component | Details |
+|-----------|---------|
+| Prometheus | Metrics collection with a 7-day retention window |
+| Grafana | Dashboards UI, auto-provisioned with the Prometheus data source |
+| Alertmanager | Alert routing and grouping |
+| Prometheus Operator | Manages `PrometheusRule` and `ServiceMonitor` CRDs |
+
+All components are installed into the `monitoring` namespace, which ArgoCD creates automatically via `CreateNamespace=true`.
+
+### Configuration highlights
+
+```yaml
+grafana:
+  enabled: true
+
+alertmanager:
+  enabled: true
+
+prometheus:
+  prometheusSpec:
+    retention: 7d
+
+prometheusOperator:
+  tls:
+    enabled: false
+  admissionWebhooks:
+    enabled: false
+```
+
+TLS and admission webhooks on the operator are disabled to simplify initial cluster setup. Enable them in production environments for additional security.
+
+### Access Grafana
+
+Once ArgoCD has synced the application, port-forward Grafana to your local machine:
+
+```bash
+kubectl port-forward svc/prometheus-grafana -n monitoring 3000:80
+```
+
+Open [http://localhost:3000](http://localhost:3000) in your browser. By default, the chart creates Grafana with username `admin`; the password is commonly `prom-operator` unless overridden via `grafana.adminPassword`. If login fails, inspect the generated secret in the `monitoring` namespace:
+
+```bash
+kubectl get secret prometheus-grafana -n monitoring \
+  -o jsonpath="{.data.admin-password}" | base64 -d; echo
+```
+
+### Access Prometheus
+
+```bash
+kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 9090:9090
+```
+
+Open [http://localhost:9090](http://localhost:9090) to query metrics directly.
+
+---
+
+## Microservice - Quick Start (raw manifests)
 
 ```bash
 kubectl apply -f k8s/microservice.yaml
@@ -580,7 +699,7 @@ curl http://localhost:8080/
 
 ---
 
-## CI — GitHub Actions
+## CI - GitHub Actions
 
 The workflow at `.github/workflows/sample-workload-image.yaml` automatically builds and pushes the Docker image to Docker Hub.
 
@@ -637,14 +756,14 @@ docker buildx build \
   --push ./sample-workload
 ```
 
-`--push` builds and pushes both platform variants to the registry in a single step — no separate `docker push` needed.
+`--push` builds and pushes both platform variants to the registry in a single step - no separate `docker push` needed.
 
 **Why multi-platform?**
-- Runs natively on both x86 EKS nodes (`m6a.large`) and ARM-based Graviton nodes (`m7g`, `t4g`) — no emulation overhead
+- Runs natively on both x86 EKS nodes (`m6a.large`) and ARM-based Graviton nodes (`m7g`, `t4g`) - no emulation overhead
 - Works out of the box on Apple Silicon (M-series) development machines
 - Docker automatically pulls the correct variant for the host architecture
 
-> Requires `docker buildx` (included in Docker Desktop). The CI workflow handles this automatically via QEMU — see the [GitHub Actions](#ci--github-actions) section.
+> Requires `docker buildx` (included in Docker Desktop). The CI workflow handles this automatically via QEMU - see the [GitHub Actions](#ci--github-actions) section.
 
 Then update the `image:` field in `k8s/microservice.yaml` before applying:
 
@@ -654,11 +773,50 @@ image: docker.io/<your-dockerhub-username>/simple-time-service:latest
 
 ## Cleanup
 
-To remove deployed resources:
+### 1 - Remove ArgoCD-managed applications
+
+```bash
+# Delete the root app - ArgoCD will prune all child apps and their resources
+kubectl delete -f gitops/bootstrap/root-app.yaml
+```
+
+Wait for ArgoCD to finish pruning (the `simple-time-service` and `prometheus` namespaces and their resources will be removed automatically if `prune: true` is set in the sync policy).
+
+### 2 - Uninstall ArgoCD
+
+```bash
+kubectl delete -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+kubectl delete namespace argocd
+```
+
+### 3 - Remove the Helm release (if deployed outside ArgoCD)
+
+```bash
+helm uninstall simple-time-service
+# If installed in a custom namespace:
+helm uninstall simple-time-service --namespace simple-time-service
+kubectl delete namespace simple-time-service
+```
+
+### 4 - Remove raw manifest resources (if applied directly)
 
 ```bash
 kubectl delete -f k8s/microservice.yaml
 ```
+
+### 5 - Destroy the Terraform infrastructure
+
+```bash
+cd terraform
+terraform destroy
+```
+
+This removes all AWS resources (VPC, EKS cluster, node group, NAT Gateway, IAM roles). Confirm with `yes` when prompted.
+
+> **S3 state bucket:** `terraform destroy` does **not** delete the S3 bucket used for remote state. Remove it manually after the destroy if it is no longer needed:
+> ```bash
+> aws s3 rb s3://<your-bucket-name> --force
+> ```
 
 ---
 
@@ -684,3 +842,13 @@ kubectl delete -f k8s/microservice.yaml
 - **Framework**: FastAPI + Uvicorn
 - **Container**: single-stage build based on python:3.12-slim, kept small by clearing pip cache.
 - **ASGI server**: Uvicorn (production-grade async Python server)
+
+---
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| `kubectl get nodes` returns `Unauthorized` | Run `aws eks update-kubeconfig` using the same IAM identity that ran `terraform apply`, or add that identity as an EKS access entry. |
+| ArgoCD apps not appearing after bootstrap | Manually sync the root app: `argocd app sync root-app` or click **Sync** on the root-app tile in the UI. |
+| Service not reachable from localhost | The Service type is `ClusterIP`. Use `kubectl port-forward svc/simple-time-service 8080:80` to reach it locally. |
