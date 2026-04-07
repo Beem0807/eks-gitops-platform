@@ -202,7 +202,7 @@ A convenient starting point is the AWS managed policies `AmazonEKSClusterPolicy`
 
 ### Remote state backend
 
-The project stores Terraform state remotely in an S3 bucket (backend.tf). Native S3 state locking is enabled with use_lockfile = true. DynamoDB-based locking for the S3 backend is deprecated.
+The project stores Terraform state remotely in an S3 bucket (`backend.tf`). Native S3 state locking is enabled with `use_lockfile = true`. DynamoDB-based locking for the S3 backend is deprecated.
 
 Before running `terraform init` for the first time, either:
 
@@ -587,6 +587,7 @@ alertmanager:
 prometheus:
   prometheusSpec:
     retention: 7d
+    serviceMonitorSelectorNilUsesHelmValues: false
 
 prometheusOperator:
   tls:
@@ -596,6 +597,8 @@ prometheusOperator:
 ```
 
 TLS and admission webhooks on the operator are disabled to simplify initial cluster setup. Enable them in production environments for additional security.
+
+`serviceMonitorSelectorNilUsesHelmValues: false` tells Prometheus to discover `ServiceMonitor` resources across **all namespaces**, not just the `monitoring` namespace where Prometheus itself runs. Without this, `ServiceMonitor` resources created in `default` (or any other namespace) are silently ignored.
 
 ### Access Grafana
 
@@ -619,6 +622,51 @@ kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 909
 ```
 
 Open [http://localhost:9090](http://localhost:9090) to query metrics directly.
+
+### Verify the ServiceMonitor is working
+
+> This section applies only when the service is deployed with `serviceMonitor.enabled=true` and the `latest` image tag (which exposes the `/metrics` endpoint).
+
+**1. Confirm the ServiceMonitor resource exists:**
+
+```bash
+kubectl get servicemonitor -n default
+# Should show: simple-time-service
+```
+
+**2. Check Prometheus has picked it up as a scrape target:**
+
+```bash
+kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 9090:9090
+```
+
+Open [http://localhost:9090/targets](http://localhost:9090/targets) and look for a target matching `simple-time-service`. It should show **State: UP**.
+
+> If the target is missing, the most common cause is a label mismatch. `kube-prometheus-stack` configures Prometheus with `serviceMonitorSelectorNilUsesHelmValues: false` in this repo, which means Prometheus discovers `ServiceMonitor` resources across all namespaces. If you changed this value, ensure the `ServiceMonitor` labels match the `serviceMonitorSelector` on the Prometheus CR.
+
+**3. Query a metric to confirm data is flowing:**
+
+In the Prometheus UI ([http://localhost:9090](http://localhost:9090)), run:
+
+```promql
+http_requests_total
+```
+
+You should see time-series with labels like `handler="/"` and `method="GET"`. If the result is empty, the service has not received any requests yet — send a few with `curl` and re-query.
+
+**4. Quick end-to-end check via curl:**
+
+```bash
+# Forward the service in one terminal
+kubectl port-forward svc/simple-time-service 8080:80
+
+# Hit the endpoint a few times to generate metrics
+curl http://localhost:8080/
+curl http://localhost:8080/health
+
+# Then check the raw metrics output
+curl http://localhost:8080/metrics | grep http_requests_total
+```
 
 ---
 
@@ -795,11 +843,11 @@ image: docker.io/<your-dockerhub-username>/simple-time-service:latest
 ### 1 - Remove ArgoCD-managed applications
 
 ```bash
-# Delete the root app - ArgoCD will prune all child apps and their resources
+# Delete the root app - ArgoCD is expected to prune child apps and their managed resources when prune: true is enabled
 kubectl delete -f gitops/bootstrap/root-app.yaml
 ```
 
-Wait for ArgoCD to finish pruning (the `simple-time-service` and `prometheus` namespaces and their resources will be removed automatically if `prune: true` is set in the sync policy).
+Wait for ArgoCD to finish pruning. With `prune: true` in the sync policy, ArgoCD should remove the managed resources and namespaces — verify in the UI or with `kubectl get ns` that they are gone before proceeding.
 
 ### 2 - Uninstall ArgoCD
 
@@ -854,7 +902,7 @@ This removes all AWS resources (VPC, EKS cluster, node group, NAT Gateway, IAM r
 |------|--------|-------------|
 | `/` | GET | Returns `timestamp` and caller `ip` |
 | `/health` | GET | Liveness / readiness probe (`{"status": "ok"}`) |
-| `/metrics` | GET | Prometheus metrics (available on `latest` tag only — see table below) |
+| `/metrics` | GET | Prometheus metrics (available on `latest` tag only - see table below) |
 
 ### Prometheus metrics exposed
 
@@ -864,12 +912,12 @@ Metrics are emitted by [`prometheus-fastapi-instrumentator`](https://github.com/
 |--------|------|--------|-------------|
 | `http_requests_total` | Counter | `method`, `handler`, `status` | Total HTTP requests completed |
 | `http_request_duration_seconds` | Histogram | `method`, `handler`, `status` | Request latency distribution (use for p50/p95/p99) |
-| `http_request_duration_highr_seconds` | Histogram | — | High-resolution latency histogram (no label cardinality) |
+| `http_request_duration_highr_seconds` | Histogram | - | High-resolution latency histogram (no label cardinality) |
 | `http_request_size_bytes` | Histogram | `method`, `handler` | Incoming request body size |
 | `http_response_size_bytes` | Histogram | `method`, `handler` | Outgoing response body size |
 | `http_requests_inprogress` | Gauge | `method`, `handler` | Currently in-flight requests |
-| `process_*` | Various | — | Python process metrics (CPU, memory, file descriptors) |
-| `python_*` | Various | — | Python runtime metrics (GC, info) |
+| `process_*` | Various | - | Python process metrics (CPU, memory, file descriptors) |
+| `python_*` | Various | - | Python runtime metrics (GC, info) |
 
 ## Technology
 
@@ -887,3 +935,4 @@ Metrics are emitted by [`prometheus-fastapi-instrumentator`](https://github.com/
 | `kubectl get nodes` returns `Unauthorized` | Run `aws eks update-kubeconfig` using the same IAM identity that ran `terraform apply`, or add that identity as an EKS access entry. |
 | ArgoCD apps not appearing after bootstrap | Manually sync the root app: `argocd app sync root-app` or click **Sync** on the root-app tile in the UI. |
 | Service not reachable from localhost | The Service type is `ClusterIP`. Use `kubectl port-forward svc/simple-time-service 8080:80` to reach it locally. |
+| `simple-time-service` ServiceMonitor not appearing in Prometheus targets | By default, Prometheus only discovers `ServiceMonitor` resources in the `monitoring` namespace. Set `serviceMonitorSelectorNilUsesHelmValues: false` in `prometheusSpec` (see [prometheus.yaml](gitops/prometheus/prometheus.yaml)) so Prometheus watches all namespaces. Also confirm `serviceMonitor.enabled: true` is set in the app's Helm values (see [simple-time-service.yaml](gitops/app/simple-time-service.yaml)). Verify with `kubectl get servicemonitor -n default`. |

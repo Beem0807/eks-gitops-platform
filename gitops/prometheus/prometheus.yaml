@@ -29,6 +29,7 @@ spec:
             prometheus:
               prometheusSpec:
                 retention: 7d
+                serviceMonitorSelectorNilUsesHelmValues: false
 
             prometheusOperator:
               tls:

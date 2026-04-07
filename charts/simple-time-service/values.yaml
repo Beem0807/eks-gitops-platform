@@ -52,6 +52,12 @@ pdb:
   enabled: true
   minAvailable: 1
 
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  path: /metrics
+  labels: {}
+
 podAnnotations: {}
 
 nodeSelector: {}
