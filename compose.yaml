@@ -1,0 +1,12 @@
+services:
+  simple-time-service:
+    build:
+      context: ./sample-workload
+      dockerfile: Dockerfile
+    image: simple-time-service:local
+    container_name: simple-time-service
+    ports:
+      - "8080:8080"
+    environment:
+      PYTHONUNBUFFERED: "1"
+    restart: unless-stopped
