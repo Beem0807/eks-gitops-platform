@@ -196,13 +196,13 @@ The IAM principal used by Terraform needs permissions to create and manage: VPC 
 
 A convenient starting point is the AWS managed policies `AmazonEKSClusterPolicy` and `AmazonEKSWorkerNodePolicy` combined with VPC and IAM write permissions. For production use, scope these down to the minimum required.
 
-> **S3 backend note:** If you are using the S3 remote state backend (`backend.tf`), the Terraform principal also needs S3 permissions on the state bucket: `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject`, and `s3:ListBucket`. If native S3 state locking is enabled (`use_lockfile = true`), no additional DynamoDB permissions are required.
+> **S3 backend note:** If you are using the S3 remote state backend (`backend.tf`), the Terraform principal also needs S3 permissions on the state bucket: `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject`, and `s3:ListBucket`. If native S3 state locking is enabled (use_lockfile = true), no DynamoDB table or DynamoDB permissions are required.
 
 ---
 
 ### Remote state backend
 
-The project stores Terraform state remotely in an S3 bucket (`backend.tf`). Native S3 state locking is enabled with `use_lockfile = true` (supported from Terraform 1.10). DynamoDB-based locking for the S3 backend is deprecated.
+The project stores Terraform state remotely in an S3 bucket (backend.tf). Native S3 state locking is enabled with use_lockfile = true. DynamoDB-based locking for the S3 backend is deprecated.
 
 Before running `terraform init` for the first time, either:
 
@@ -314,7 +314,7 @@ This removes all AWS resources created by Terraform. Confirm with `yes` when pro
 
 The chart at `charts/simple-time-service/` is the recommended way to deploy the service to Kubernetes. It provides configurable replicas, resource limits, health probes, a PodDisruptionBudget, and a full set of security-context defaults - all tuneable through `values.yaml`.
 
-> The raw manifest at `k8s/microservice.yaml` is a minimal alternative for quickly testing the service. The Helm chart is the production-style deployment used by ArgoCD in this platform.
+> The raw manifest at `k8s/microservice.yaml` is a minimal alternative for quickly testing the service. The Helm chart is the configurable deployment used by ArgoCD in this platform.
 
 ### Prerequisites
 
@@ -372,7 +372,7 @@ All values can be overridden with `--set key=value` or a custom values file (`-f
 | `fullnameOverride` | `simple-time-service` | Override the full resource name |
 | `replicaCount` | `2` | Number of pod replicas |
 | `image.repository` | `docker.io/nabeemdev/simple-time-service` | Container image repository |
-| `image.tag` | `v1` | Image tag |
+| `image.tag` | `v1` | Image tag (`v1` = baseline, `latest` = metrics-enabled build) |
 | `image.pullPolicy` | `IfNotPresent` | Image pull policy |
 | `service.type` | `ClusterIP` | Kubernetes Service type |
 | `service.port` | `80` | Service port |
@@ -399,18 +399,30 @@ All values can be overridden with `--set key=value` or a custom values file (`-f
 | `serviceAccount.annotations` | `{}` | Annotations for the ServiceAccount |
 | `pdb.enabled` | `true` | Create a PodDisruptionBudget |
 | `pdb.minAvailable` | `1` | Minimum pods available during disruptions |
+| `serviceMonitor.enabled` | `false` | Create a Prometheus `ServiceMonitor` (requires Prometheus Operator) |
+| `serviceMonitor.interval` | `30s` | Scrape interval |
+| `serviceMonitor.path` | `/metrics` | Metrics endpoint path |
+| `serviceMonitor.labels` | `{}` | Extra labels added to the `ServiceMonitor` (use to match Prometheus `serviceMonitorSelector`) |
 | `podAnnotations` | `{}` | Extra pod annotations |
 | `nodeSelector` | `{}` | Node selector constraints |
 | `tolerations` | `[]` | Pod tolerations |
 | `affinity` | `{}` | Pod affinity/anti-affinity rules |
 
-### Example - custom image and 3 replicas
+### Example - deploy without metrics (v1)
 
 ```bash
 helm install simple-time-service charts/simple-time-service \
-  --set image.repository=docker.io/myuser/simple-time-service \
-  --set image.tag=v2 \
-  --set replicaCount=3
+  --set image.tag=v1
+```
+
+### Example - deploy with Prometheus metrics (latest)
+
+Requires Prometheus Operator to be installed on the cluster.
+
+```bash
+helm install simple-time-service charts/simple-time-service \
+  --set image.tag=latest \
+  --set serviceMonitor.enabled=true
 ```
 
 ---
@@ -713,10 +725,11 @@ The workflow at `.github/workflows/sample-workload-image.yaml` automatically bui
 
 ### Tagging strategy
 
-| Tag | When applied |
-|-----|-------------|
-| Short commit SHA (e.g. `a1b2c3d`) | Every build |
-| `latest` | Push to `main` only |
+| Tag | When applied | Notes |
+|-----|-------------|-------|
+| Short commit SHA (e.g. `a1b2c3d`) | Every build | Immutable per-commit reference |
+| `latest` | Push to `main` only | Tracks the current `main` - includes Prometheus `/metrics` endpoint |
+| `v1` | Pinned manually | Baseline version without metrics |
 
 ### Required secrets
 
@@ -733,15 +746,21 @@ Generate a token at **Docker Hub → Account Settings → Personal access tokens
 
 ## Docker image
 
-The public image is published on DockerHub:
+The image is published on Docker Hub under two distinct tags:
 
-```
-docker.io/nabeemdev/simple-time-service:latest
-```
+| Tag | Metrics endpoint | Use when |
+|-----|-----------------|----------|
+| `v1` | No | You don't need Prometheus metrics |
+| `latest` | Yes (`/metrics`) | You want Prometheus scraping via ServiceMonitor |
 
-Pull it directly:
+> **`v1`** is a pinned baseline - the original service with no instrumentation.
+> **`latest`** tracks `main` and includes the Prometheus `/metrics` endpoint exposed by `prometheus-fastapi-instrumentator`. Use this tag when deploying with the Helm chart and `serviceMonitor.enabled=true`.
 
 ```bash
+# No metrics (baseline)
+docker pull nabeemdev/simple-time-service:v1
+
+# With /metrics endpoint (convenient for demos; in production prefer an immutable version tag)
 docker pull nabeemdev/simple-time-service:latest
 ```
 
@@ -835,6 +854,22 @@ This removes all AWS resources (VPC, EKS cluster, node group, NAT Gateway, IAM r
 |------|--------|-------------|
 | `/` | GET | Returns `timestamp` and caller `ip` |
 | `/health` | GET | Liveness / readiness probe (`{"status": "ok"}`) |
+| `/metrics` | GET | Prometheus metrics (available on `latest` tag only — see table below) |
+
+### Prometheus metrics exposed
+
+Metrics are emitted by [`prometheus-fastapi-instrumentator`](https://github.com/trallnag/prometheus-fastapi-instrumentator) and the standard Python `prometheus_client` collectors.
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `http_requests_total` | Counter | `method`, `handler`, `status` | Total HTTP requests completed |
+| `http_request_duration_seconds` | Histogram | `method`, `handler`, `status` | Request latency distribution (use for p50/p95/p99) |
+| `http_request_duration_highr_seconds` | Histogram | — | High-resolution latency histogram (no label cardinality) |
+| `http_request_size_bytes` | Histogram | `method`, `handler` | Incoming request body size |
+| `http_response_size_bytes` | Histogram | `method`, `handler` | Outgoing response body size |
+| `http_requests_inprogress` | Gauge | `method`, `handler` | Currently in-flight requests |
+| `process_*` | Various | — | Python process metrics (CPU, memory, file descriptors) |
+| `python_*` | Various | — | Python runtime metrics (GC, info) |
 
 ## Technology
 

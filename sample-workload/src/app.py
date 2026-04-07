@@ -3,8 +3,11 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from prometheus_fastapi_instrumentator import Instrumentator
 
 app = FastAPI(title="simple-time-service")
+
+Instrumentator().instrument(app).expose(app, include_in_schema=False)
 
 
 def configure_logging() -> logging.Logger:
