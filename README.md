@@ -1,13 +1,14 @@
 # EKS GitOps Platform
 
-This repository contains six components:
+This repository contains five platform components plus a shared utility chart:
 
 1. **SimpleTimeService** - a minimal Python microservice containerized with Docker and deployable to Kubernetes.
 2. **Terraform infrastructure** - an AWS VPC and EKS cluster provisioned with Terraform.
 3. **GitOps platform** - ArgoCD running on the EKS cluster, managing deployments via the App of Apps pattern.
 4. **Monitoring** - Prometheus and Grafana deployed via ArgoCD using the `kube-prometheus-stack` Helm chart, with a pre-built Grafana dashboard for SimpleTimeService auto-provisioned via the `charts/raw` generic Helm chart.
 5. **Autoscaling** - `metrics-server` deployed via ArgoCD enabling HPA-based horizontal pod autoscaling for SimpleTimeService.
-6. **Generic Helm chart** - a reusable `charts/raw` chart for deploying arbitrary Kubernetes resources through the same ApplicationSet pattern used by the rest of the platform.
+
+**Utility:** `charts/raw` - a reusable generic Helm chart for deploying arbitrary Kubernetes resources through the same ApplicationSet pattern used by the platform components above.
 
 > **Naming note:** The application is called SimpleTimeService. Its source code lives under `sample-workload/`, the raw Kubernetes manifest is in `k8s/microservice.yaml`, and the Helm release name is `simple-time-service`. These names refer to the same service.
 
@@ -33,6 +34,7 @@ kubectl apply -f gitops/bootstrap/root-app.yaml
 # 5. Verify applications in ArgoCD
 kubectl port-forward svc/argocd-server -n argocd 8080:443
 # Open https://localhost:8080 - simple-time-service, prometheus, metrics-server, and grafana-dashboards apps should appear
+# (The first reconciliation can take up to 3 minutes. If apps are missing, run: argocd app sync root-app)
 
 # 6. Verify the service
 kubectl port-forward svc/simple-time-service -n simple-time-service 8080:80
@@ -464,7 +466,7 @@ helm install simple-time-service charts/simple-time-service \
 
 ## Generic Helm chart (`charts/raw`)
 
-The `charts/raw` chart is a minimal, reusable chart that renders any list of Kubernetes resources passed in via `values.yaml`. It is modelled after the [Helm incubator `raw` chart](https://github.com/helm/charts/tree/master/incubator/raw) and exists so that every resource in the platform — including plain ConfigMaps — can be deployed through the same ApplicationSet pattern without needing a separate raw manifest in `gitops/`.
+The `charts/raw` chart is a minimal, reusable chart that renders any list of Kubernetes resources passed in via `values.yaml`. It is modelled after the [Helm incubator `raw` chart](https://github.com/helm/charts/tree/master/incubator/raw) and exists so that every resource in the platform - including plain ConfigMaps - can be deployed through the same ApplicationSet pattern without needing a separate raw manifest in `gitops/`.
 
 ### How it works
 
@@ -583,7 +585,7 @@ Apply the root app manifest once. This is the only manual deployment step:
 kubectl apply -f gitops/bootstrap/root-app.yaml
 ```
 
-ArgoCD immediately begins reconciling the `gitops/` directory. Within a few seconds it discovers `gitops/app/simple-time-service.yaml` and creates the `ApplicationSet`, which in turn provisions the `simple-time-service` application on every registered cluster.
+ArgoCD begins reconciling the `gitops/` directory. Within the default polling interval (up to 3 minutes) it discovers `gitops/app/simple-time-service.yaml` and creates the `ApplicationSet`, which in turn provisions the `simple-time-service` application on every registered cluster.
 
 ---
 
@@ -757,6 +759,11 @@ TLS and admission webhooks on the operator are disabled to simplify initial clus
 
 `serviceMonitorSelectorNilUsesHelmValues: false` tells Prometheus to discover `ServiceMonitor` resources across **all namespaces**, not just the `monitoring` namespace where Prometheus itself runs. Without this, `ServiceMonitor` resources created in `simple-time-service` (or any other namespace) are silently ignored.
 
+> **Where do these metrics come from?**
+> `kube-state-metrics` is deployed automatically as part of the `kube-prometheus-stack` Helm chart used in this repo. It exposes Kubernetes object/state metrics such as Deployments, Pods, replica counts, and resource requests/limits.
+> This is what powers dashboard panels like **Available Replicas**, **Total Pods**, **CPU Request vs Usage**, and **Memory Request/Limit vs Usage**.
+> Actual container CPU and memory usage come from kubelet/cAdvisor metrics scraped by Prometheus. cAdvisor is embedded in the kubelet on each node rather than deployed as a separate application.
+
 ### Access Grafana
 
 Once ArgoCD has synced the application, port-forward Grafana to your local machine:
@@ -784,18 +791,46 @@ Open [http://localhost:9090](http://localhost:9090) to query metrics directly.
 
 A pre-built dashboard is automatically provisioned into Grafana via the `gitops/grafana/simple-time-service-dashboard.yaml` ApplicationSet. It uses the generic `charts/raw` Helm chart to deploy a ConfigMap with label `grafana_dashboard: "1"` into the `monitoring` namespace. Grafana's sidecar detects the label and imports the dashboard without any manual steps.
 
-The dashboard contains four panels:
+The dashboard (UID `simple-time-service`, auto-refreshes every 30 seconds) contains 12 panels organized into five rows:
+
+**Row 1 - Status overview (stat panels)**
+
+| Panel | Query | Notes |
+|-------|-------|-------|
+| Scrape Status | `min(up{job=~".*simple-time-service.*"})` | Displays "Up" / "Down" - reflects Prometheus scrape availability, not uptime duration |
+| Available Replicas | `kube_deployment_status_replicas_available{namespace="simple-time-service"}` | |
+| Total Pods | `count(kube_pod_info{namespace="simple-time-service", pod=~"simple-time-service-.*"})` | |
+| Requests (Last 5m) | `sum(increase(http_requests_total{...}[5m]))` | Excludes `/metrics` and `/health` |
+
+**Row 2 - Traffic**
 
 | Panel | Query | Unit |
 |-------|-------|------|
-| Request Rate | `rate(http_request_duration_seconds_count[5m])` broken down by `status` | req/s |
+| Request Rate | `sum(rate(http_request_duration_seconds_count{...}[5m]))` | req/s |
 | Latency | `histogram_quantile` p50 / p95 / p99 on `http_request_duration_seconds_bucket` | seconds |
-| Request Activity | `sum(rate(http_request_duration_seconds_count{job=~".*simple-time-service.*"}[1m]))` | req/s |
-| Replica Count | `kube_deployment_status_replicas_available` | count (stat panel) |
 
-Although the app exposes `http_requests_inprogress`, the dashboard uses request rate for panel 3 because it provides a more reliable visualization under low traffic.
+**Row 3 - Request activity**
 
-The dashboard panels show **No data** until the ServiceMonitor is enabled and the service has received traffic. Panels populate automatically once metrics are flowing - no manual import or restart is needed.
+| Panel | Query | Unit |
+|-------|-------|------|
+| Request Activity | `sum(rate(http_request_duration_seconds_count{...}[1m]))` | req/s |
+| Request Count by Status | `sum by(status)(increase(http_requests_total{...}[5m]))` | count |
+
+**Row 4 - CPU**
+
+| Panel | Query | Unit |
+|-------|-------|------|
+| CPU Request vs Usage | actual usage vs `kube_pod_container_resource_requests{resource="cpu"}` | cores |
+| CPU Limit vs Usage | actual usage vs `kube_pod_container_resource_limits{resource="cpu"}` | cores |
+
+**Row 5 - Memory**
+
+| Panel | Query | Unit |
+|-------|-------|------|
+| Memory Request vs Usage (MiB) | working set bytes vs `kube_pod_container_resource_requests{resource="memory"}` | MiB |
+| Memory Limit vs Usage (MiB) | working set bytes vs `kube_pod_container_resource_limits{resource="memory"}` | MiB |
+
+The HTTP traffic panels (rows 2–3) show **No data** until the ServiceMonitor is enabled and the service has received traffic on a non-excluded handler. Note that `/health` and `/metrics` requests are filtered out by all traffic queries, so hitting only those paths will not populate the panels - send requests to `/` instead. The infrastructure panels (rows 1, 4–5) populate from `kube-state-metrics` and `cAdvisor` regardless of the ServiceMonitor. Panels populate automatically once the relevant metrics are flowing - no manual import or restart is needed.
 
 > To add more dashboards, append additional `ConfigMap` entries to the `resources:` list in `gitops/grafana/simple-time-service-dashboard.yaml`.
 
@@ -1114,7 +1149,7 @@ Metrics are emitted by [`prometheus-fastapi-instrumentator`](https://github.com/
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
 | `http_requests_total` | Counter | `method`, `handler`, `status` | Total HTTP requests completed |
-| `http_request_duration_seconds` | Histogram | `method`, `handler`, `status` | Request latency distribution (use for p50/p95/p99) |
+| `http_request_duration_seconds` | Histogram | `method`, `handler` | Request latency distribution (use for p50/p95/p99) |
 | `http_request_duration_highr_seconds` | Histogram | — | High-resolution latency histogram (no label cardinality) |
 | `http_request_size_bytes` | Histogram | `method`, `handler` | Incoming request body size |
 | `http_response_size_bytes` | Histogram | `method`, `handler` | Outgoing response body size |

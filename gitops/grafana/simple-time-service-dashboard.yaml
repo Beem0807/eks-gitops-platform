@@ -35,73 +35,46 @@ spec:
                     {
                       "title": "Simple Time Service",
                       "uid": "simple-time-service",
+                      "tags": ["simple-time-service", "kubernetes", "demo"],
                       "timezone": "browser",
                       "refresh": "30s",
                       "schemaVersion": 38,
                       "panels": [
                         {
                           "id": 1,
-                          "title": "Request Rate",
-                          "type": "timeseries",
-                          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+                          "title": "Scrape Status",
+                          "type": "stat",
+                          "gridPos": { "h": 8, "w": 6, "x": 0, "y": 0 },
                           "targets": [
                             {
-                              "expr": "sum by(status) (rate(http_request_duration_seconds_count{job=~\".*simple-time-service.*\"}[5m]))",
-                              "legendFormat": "{{ `{{` }} status {{ `}}` }}",
+                              "expr": "min(up{job=~\".*simple-time-service.*\"})",
+                              "legendFormat": "up",
                               "refId": "A"
                             }
                           ],
+                          "options": {
+                            "reduceOptions": { "calcs": ["lastNotNull"] }
+                          },
                           "fieldConfig": {
-                            "defaults": { "unit": "reqps" }
+                            "defaults": {
+                              "unit": "short",
+                              "mappings": [
+                                {
+                                  "type": "value",
+                                  "options": {
+                                    "0": { "text": "Down" },
+                                    "1": { "text": "Up" }
+                                  }
+                                }
+                              ]
+                            }
                           }
                         },
                         {
                           "id": 2,
-                          "title": "Latency",
-                          "type": "timeseries",
-                          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
-                          "targets": [
-                            {
-                              "expr": "histogram_quantile(0.50, sum by(le) (rate(http_request_duration_seconds_bucket{job=~\".*simple-time-service.*\"}[5m])))",
-                              "legendFormat": "p50",
-                              "refId": "A"
-                            },
-                            {
-                              "expr": "histogram_quantile(0.95, sum by(le) (rate(http_request_duration_seconds_bucket{job=~\".*simple-time-service.*\"}[5m])))",
-                              "legendFormat": "p95",
-                              "refId": "B"
-                            },
-                            {
-                              "expr": "histogram_quantile(0.99, sum by(le) (rate(http_request_duration_seconds_bucket{job=~\".*simple-time-service.*\"}[5m])))",
-                              "legendFormat": "p99",
-                              "refId": "C"
-                            }
-                          ],
-                          "fieldConfig": {
-                            "defaults": { "unit": "s" }
-                          }
-                        },
-                        {
-                          "id": 3,
-                          "title": "Request Activity",
-                          "type": "timeseries",
-                          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
-                          "targets": [
-                            {
-                              "expr": "sum(rate(http_request_duration_seconds_count{job=~\".*simple-time-service.*\"}[1m]))",
-                              "legendFormat": "req/sec",
-                              "refId": "A"
-                            }
-                          ],
-                          "fieldConfig": {
-                            "defaults": { "unit": "reqps" }
-                          }
-                        },
-                        {
-                          "id": 4,
-                          "title": "Replica Count",
+                          "title": "Available Replicas",
                           "type": "stat",
-                          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+                          "gridPos": { "h": 8, "w": 6, "x": 6, "y": 0 },
                           "targets": [
                             {
                               "expr": "kube_deployment_status_replicas_available{namespace=\"simple-time-service\", deployment=\"simple-time-service\"}",
@@ -112,6 +85,202 @@ spec:
                           "options": {
                             "reduceOptions": { "calcs": ["lastNotNull"] }
                           },
+                          "fieldConfig": {
+                            "defaults": { "unit": "short" }
+                          }
+                        },
+                        {
+                          "id": 3,
+                          "title": "Total Pods",
+                          "type": "stat",
+                          "gridPos": { "h": 8, "w": 6, "x": 12, "y": 0 },
+                          "targets": [
+                            {
+                              "expr": "count(kube_pod_info{namespace=\"simple-time-service\", pod=~\"simple-time-service-.*\"})",
+                              "legendFormat": "pods",
+                              "refId": "A"
+                            }
+                          ],
+                          "options": {
+                            "reduceOptions": { "calcs": ["lastNotNull"] }
+                          },
+                          "fieldConfig": {
+                            "defaults": { "unit": "short" }
+                          }
+                        },
+                        {
+                          "id": 4,
+                          "title": "Requests (Last 5m)",
+                          "type": "stat",
+                          "gridPos": { "h": 8, "w": 6, "x": 18, "y": 0 },
+                          "targets": [
+                            {
+                              "expr": "sum(increase(http_requests_total{job=~\".*simple-time-service.*\",handler!=\"/metrics\",handler!=\"/health\"}[5m]))",
+                              "legendFormat": "requests",
+                              "refId": "A"
+                            }
+                          ],
+                          "options": {
+                            "reduceOptions": { "calcs": ["lastNotNull"] }
+                          },
+                          "fieldConfig": {
+                            "defaults": { "unit": "short" }
+                          }
+                        },
+                        {
+                          "id": 5,
+                          "title": "Request Rate",
+                          "type": "timeseries",
+                          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+                          "targets": [
+                            {
+                              "expr": "sum(rate(http_request_duration_seconds_count{job=~\".*simple-time-service.*\",handler!=\"/metrics\",handler!=\"/health\"}[5m]))",
+                              "legendFormat": "req/sec",
+                              "refId": "A"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": { "unit": "reqps" }
+                          }
+                        },
+                        {
+                          "id": 6,
+                          "title": "Latency",
+                          "type": "timeseries",
+                          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+                          "targets": [
+                            {
+                              "expr": "histogram_quantile(0.50, sum by(le) (rate(http_request_duration_seconds_bucket{job=~\".*simple-time-service.*\",handler!=\"/metrics\",handler!=\"/health\"}[5m])))",
+                              "legendFormat": "p50",
+                              "refId": "A"
+                            },
+                            {
+                              "expr": "histogram_quantile(0.95, sum by(le) (rate(http_request_duration_seconds_bucket{job=~\".*simple-time-service.*\",handler!=\"/metrics\",handler!=\"/health\"}[5m])))",
+                              "legendFormat": "p95",
+                              "refId": "B"
+                            },
+                            {
+                              "expr": "histogram_quantile(0.99, sum by(le) (rate(http_request_duration_seconds_bucket{job=~\".*simple-time-service.*\",handler!=\"/metrics\",handler!=\"/health\"}[5m])))",
+                              "legendFormat": "p99",
+                              "refId": "C"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": { "unit": "s" }
+                          }
+                        },
+                        {
+                          "id": 7,
+                          "title": "Request Activity",
+                          "type": "timeseries",
+                          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+                          "targets": [
+                            {
+                              "expr": "sum(rate(http_request_duration_seconds_count{job=~\".*simple-time-service.*\",handler!=\"/metrics\",handler!=\"/health\"}[1m]))",
+                              "legendFormat": "req/sec",
+                              "refId": "A"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": { "unit": "reqps" }
+                          }
+                        },
+                        {
+                          "id": 8,
+                          "title": "Request Count by Status",
+                          "type": "timeseries",
+                          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+                          "targets": [
+                            {
+                              "expr": "sum by(status) (increase(http_requests_total{job=~\".*simple-time-service.*\",handler!=\"/metrics\",handler!=\"/health\"}[5m]))",
+                              "legendFormat": "{{ `{{` }} status {{ `}}` }}",
+                              "refId": "A"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": { "unit": "short" }
+                          }
+                        },
+                        {
+                          "id": 9,
+                          "title": "CPU Request vs Usage",
+                          "type": "timeseries",
+                          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+                          "targets": [
+                            {
+                              "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"simple-time-service\", pod=~\"simple-time-service-.*\", container!=\"\", container!=\"POD\"}[5m]))",
+                              "legendFormat": "usage",
+                              "refId": "A"
+                            },
+                            {
+                              "expr": "sum(kube_pod_container_resource_requests{namespace=\"simple-time-service\", pod=~\"simple-time-service-.*\", resource=\"cpu\", unit=\"core\"})",
+                              "legendFormat": "request",
+                              "refId": "B"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": { "unit": "cores" }
+                          }
+                        },
+                        {
+                          "id": 10,
+                          "title": "CPU Limit vs Usage",
+                          "type": "timeseries",
+                          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+                          "targets": [
+                            {
+                              "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"simple-time-service\", pod=~\"simple-time-service-.*\", container!=\"\", container!=\"POD\"}[5m]))",
+                              "legendFormat": "usage",
+                              "refId": "A"
+                            },
+                            {
+                              "expr": "sum(kube_pod_container_resource_limits{namespace=\"simple-time-service\", pod=~\"simple-time-service-.*\", resource=\"cpu\", unit=\"core\"})",
+                              "legendFormat": "limit",
+                              "refId": "B"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": { "unit": "cores" }
+                          }
+                        },
+                        {
+                          "id": 11,
+                          "title": "Memory Request vs Usage (MiB)",
+                          "type": "timeseries",
+                          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
+                          "targets": [
+                            {
+                              "expr": "sum(container_memory_working_set_bytes{namespace=\"simple-time-service\", pod=~\"simple-time-service-.*\", container!=\"\", container!=\"POD\"}) / 1024 / 1024",
+                              "legendFormat": "usage",
+                              "refId": "A"
+                            },
+                            {
+                              "expr": "sum(kube_pod_container_resource_requests{namespace=\"simple-time-service\", pod=~\"simple-time-service-.*\", resource=\"memory\", unit=\"byte\"}) / 1024 / 1024",
+                              "legendFormat": "request",
+                              "refId": "B"
+                            }
+                          ],
+                          "fieldConfig": {
+                            "defaults": { "unit": "short" }
+                          }
+                        },
+                        {
+                          "id": 12,
+                          "title": "Memory Limit vs Usage (MiB)",
+                          "type": "timeseries",
+                          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
+                          "targets": [
+                            {
+                              "expr": "sum(container_memory_working_set_bytes{namespace=\"simple-time-service\", pod=~\"simple-time-service-.*\", container!=\"\", container!=\"POD\"}) / 1024 / 1024",
+                              "legendFormat": "usage",
+                              "refId": "A"
+                            },
+                            {
+                              "expr": "sum(kube_pod_container_resource_limits{namespace=\"simple-time-service\", pod=~\"simple-time-service-.*\", resource=\"memory\", unit=\"byte\"}) / 1024 / 1024",
+                              "legendFormat": "limit",
+                              "refId": "B"
+                            }
+                          ],
                           "fieldConfig": {
                             "defaults": { "unit": "short" }
                           }
