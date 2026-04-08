@@ -1,0 +1,52 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: grafana-loki-datasource
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - clusters: {}
+  template:
+    metadata:
+      name: 'grafana-loki-datasource-{{.nameNormalized}}'
+      annotations:
+        argocd.argoproj.io/sync-wave: "4"
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/Beem0807/eks-gitops-platform.git
+        targetRevision: main
+        path: charts/raw
+        helm:
+          releaseName: grafana-loki-datasource
+          values: |
+            resources:
+              - apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: grafana-loki-datasource
+                  namespace: monitoring
+                  labels:
+                    grafana_datasource: "1"
+                data:
+                  loki-datasource.yaml: |
+                    apiVersion: 1
+                    datasources:
+                      - name: Loki
+                        type: loki
+                        access: proxy
+                        url: http://loki-gateway.logging.svc.cluster.local
+                        isDefault: false
+                        editable: true
+      destination:
+        server: '{{.server}}'
+        namespace: monitoring
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
