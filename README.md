@@ -56,7 +56,7 @@ These choices are intentional for a demo environment:
 - No ingress controller is included; services are accessed via `kubectl port-forward`.
 - ArgoCD is installed manually once; everything else is GitOps-managed from that point.
 - Prometheus Operator TLS and admission webhooks are disabled to simplify bootstrap reliability.
-- `sample-workload/` folder name is kept as-is from the original task scaffolding.
+- `sample-workload/` folder name is kept as-is from the original project setup.
 
 ---
 
@@ -120,6 +120,9 @@ The service is containerized with Docker and runs as a non-root user. It can be 
 │   ├── .dockerignore
 │   └── src/
 │       └── app.py
+├── scripts/
+│   ├── load_test.py               # Python stdlib load generator (HPA / observability validation)
+│   └── k6-staged.js               # k6 staged ramping-arrival-rate load test
 └── terraform/                     # AWS infrastructure (VPC + EKS)
     ├── backend.tf                 # S3 remote state backend
     ├── main.tf                    # Root module - wires VPC and EKS modules
@@ -698,24 +701,176 @@ Verify the HPA after ArgoCD syncs:
 kubectl get hpa -n simple-time-service
 ```
 
-To observe autoscaling in action, generate load against the service:
+To observe autoscaling in action, generate load against the service. First forward the port in one terminal:
 
 ```bash
-# Forward the service in one terminal
 kubectl port-forward svc/simple-time-service -n simple-time-service 8080:80
+```
 
-# Generate load in another terminal
-while true; do curl -s http://localhost:8080/ > /dev/null; done
+Then run one of the load scripts in another terminal (see the [Load Testing](#load-testing) section for full details):
+
+```bash
+# Python (no extra dependencies)
+python3 scripts/load_test.py --concurrency 20 --duration 120
+
+# k6 staged scenario
+k6 run scripts/k6-staged.js
 ```
 
 Then watch the HPA react:
 
 ```bash
 kubectl get hpa -n simple-time-service -w
-
 ```
 
-> For a lightweight service like this, CPU utilization rises slowly under simple `curl` traffic. You may need to sustain the load for a short period before the HPA triggers a scale-out event. Scaling down after load stops is intentionally conservative - the default stabilization window is 5 minutes, configurable via `hpa.scaleDown.stabilizationWindowSeconds`.
+> For a lightweight service like this, CPU utilization rises slowly under light traffic. You may need to sustain the load for a short period before the HPA triggers a scale-out event. Scaling down after load stops is intentionally conservative - the default stabilization window is 5 minutes, configurable via `hpa.scaleDown.stabilizationWindowSeconds`.
+
+---
+
+## Load Testing
+
+Two scripts in `scripts/` generate controlled HTTP traffic for validating Kubernetes HPA behavior and the Prometheus/Grafana observability pipeline.
+
+| Script | Tool | Best for |
+|--------|------|----------|
+| `scripts/load_test.py` | Python stdlib | Quick, zero-dependency load generation |
+| `scripts/k6-staged.js` | k6 | Staged ramping-arrival-rate scenarios with built-in thresholds |
+
+---
+
+### Python load test (`scripts/load_test.py`)
+
+#### Prerequisites
+
+No third-party libraries required - uses only Python's built-in `urllib` and `threading` modules.
+
+| Requirement | Version |
+|-------------|---------|
+| Python | 3.8+ |
+
+Verify your Python version:
+
+```bash
+python3 --version
+```
+
+#### Usage
+
+```bash
+# Default: 10 workers, 60 s, targeting http://localhost:8080/
+python3 scripts/load_test.py
+
+# Custom URL
+python3 scripts/load_test.py --url http://localhost:8080/
+
+# Higher concurrency and longer run
+python3 scripts/load_test.py --url http://localhost:8080/ --concurrency 20 --duration 120
+
+# Verbose per-request debug logging
+python3 scripts/load_test.py --verbose
+```
+
+#### Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--url` | `http://localhost:8080/` | Target URL |
+| `--concurrency` | `10` | Number of concurrent worker threads |
+| `--duration` | `60` | Test duration in seconds |
+| `--verbose` | off | Enable debug-level logging per request |
+
+#### Output
+
+At the end of the run the script logs a summary:
+
+```
+Load test completed
+Total requests: 1234
+Successful: 1230
+Failed: 4
+Average req/sec: 20.57
+```
+
+---
+
+### k6 staged load test (`scripts/k6-staged.js`)
+
+#### Prerequisites / Installation
+
+| Tool | Minimum version |
+|------|----------------|
+| [k6](https://k6.io/docs/get-started/installation/) | v0.46+ |
+
+**macOS (Homebrew)**
+
+```bash
+brew install k6
+```
+
+**Linux (Debian / Ubuntu)**
+
+```bash
+sudo gpg --no-default-keyring \
+  --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
+  --keyserver hkp://keyserver.ubuntu.com:80 \
+  --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+
+echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] \
+  https://dl.k6.io/deb stable main" \
+  | sudo tee /etc/apt/sources.list.d/k6.list
+
+sudo apt-get update && sudo apt-get install k6
+```
+
+**Windows (winget)**
+
+```powershell
+winget install k6 --source winget
+```
+
+Verify the install:
+
+```bash
+k6 version
+```
+
+#### Usage
+
+```bash
+# Default target: http://localhost:8080
+k6 run scripts/k6-staged.js
+
+# Custom target URL
+BASE_URL=http://localhost:8080 k6 run scripts/k6-staged.js
+```
+
+#### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BASE_URL` | `http://localhost:8080` | Base service URL |
+
+#### Traffic profile
+
+The script uses the `ramping-arrival-rate` executor. Each iteration sends two batched requests: `GET /` and `GET /health`. Note that the Grafana dashboard filters out `/health` from all traffic panels, so only the `GET /` requests appear in request rate and latency views.
+
+| Stage | Target rate | Duration |
+|-------|-------------|----------|
+| Warm-up | 50 req/s | 30 s |
+| Ramp up | 50 → 100 req/s | 1 m |
+| Peak | 100 → 200 req/s | 1 m |
+| Ramp down | 200 → 0 req/s | 30 s |
+
+Pre-allocated VUs: 100 (max: 300)
+
+#### Thresholds
+
+k6 exits with a non-zero status code if either threshold is breached, making it suitable for CI gates.
+
+| Metric | Threshold |
+|--------|-----------|
+| `http_req_failed` | < 10 % error rate |
+| `http_req_duration` | p(95) < 2000 ms |
 
 ---
 
