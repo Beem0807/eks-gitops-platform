@@ -27,3 +27,7 @@ terraform/*_override.tf.json
 
 # Docker
 *.log
+
+# Kubernetes secrets (never commit real secret values)
+secrets/*.yaml
+!secrets/*.example.yaml

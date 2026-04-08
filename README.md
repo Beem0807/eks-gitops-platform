@@ -5,7 +5,7 @@ This repository contains five platform components plus a shared utility chart:
 1. **SimpleTimeService** - a minimal Python microservice containerized with Docker and deployable to Kubernetes.
 2. **Terraform infrastructure** - an AWS VPC and EKS cluster provisioned with Terraform.
 3. **GitOps platform** - ArgoCD running on the EKS cluster, managing deployments via the App of Apps pattern.
-4. **Monitoring** - Prometheus and Grafana deployed via ArgoCD using the `kube-prometheus-stack` Helm chart, with a pre-built Grafana dashboard for SimpleTimeService auto-provisioned via the `charts/raw` generic Helm chart.
+4. **Monitoring and Alerting** - Prometheus, Grafana, and Alertmanager deployed via ArgoCD using the `kube-prometheus-stack` Helm chart, with a pre-built Grafana dashboard auto-provisioned via `charts/raw`, and PrometheusRule-based alerts routed to Slack via an `AlertmanagerConfig` CRD.
 5. **Autoscaling** - `metrics-server` deployed via ArgoCD enabling HPA-based horizontal pod autoscaling for SimpleTimeService.
 
 **Utility:** `charts/raw` - a reusable generic Helm chart for deploying arbitrary Kubernetes resources through the same ApplicationSet pattern used by the platform components above.
@@ -33,8 +33,10 @@ kubectl apply -f gitops/bootstrap/root-app.yaml
 
 # 5. Verify applications in ArgoCD
 kubectl port-forward svc/argocd-server -n argocd 8080:443
-# Open https://localhost:8080 - simple-time-service, prometheus, metrics-server, and grafana-dashboards apps should appear
-# (The first reconciliation can take up to 3 minutes. If apps are missing, run: argocd app sync root-app)
+# Open https://localhost:8080 - apps for the service, monitoring, metrics-server,
+# Grafana dashboard, and alerting should appear (first reconciliation takes up to 3 minutes)
+# If apps are missing: argocd app sync root-app
+# Note: the alertmanager-slack app will show as degraded until the Slack secret is applied (see Alerting section)
 
 # 6. Verify the service
 kubectl port-forward svc/simple-time-service -n simple-time-service 8080:80
@@ -44,6 +46,22 @@ curl http://127.0.0.1:8080/
 kubectl port-forward svc/prometheus-grafana -n monitoring 3000:80
 # Open http://localhost:3000
 ```
+
+---
+
+## Validation checklist
+
+A reviewer can verify the full stack is working in under a minute using these checkpoints:
+
+| # | What to check | Command |
+|---|---------------|---------|
+| 1 | Terraform provisioned the cluster | `kubectl get nodes` - all nodes `Ready` |
+| 2 | ArgoCD root app synced | Check UI at `https://localhost:8080` or run `argocd app get root-app` - `Synced / Healthy` |
+| 3 | Service is responding | `curl http://127.0.0.1:8080/` - returns `timestamp` + `ip` JSON |
+| 4 | Prometheus is scraping the service | After port-forwarding Prometheus (`kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 9090:9090`), open `http://localhost:9090/targets` - `simple-time-service` target `UP` |
+| 5 | Grafana dashboard is populated | Open `http://localhost:3000` - SimpleTimeService dashboard shows live data |
+| 6 | HPA scales under load | `kubectl get hpa -n simple-time-service -w` while running `python3 scripts/load_test.py` |
+| 7 | Slack alert is delivered | Fire test alert via curl (see [Testing the Slack receiver](#testing-the-slack-receiver)) - message appears in `#alerts-test` |
 
 ---
 
@@ -93,8 +111,11 @@ The service is containerized with Docker and runs as a non-root user. It can be 
 │   │   └── prometheus.yaml                  # ArgoCD ApplicationSet - kube-prometheus-stack (Prometheus + Grafana + Alertmanager)
 │   ├── metrics-server/
 │   │   └── metrics-server.yaml              # ArgoCD ApplicationSet - metrics-server (required for HPA)
-│   └── grafana/
-│       └── simple-time-service-dashboard.yaml  # ArgoCD ApplicationSet - Grafana dashboard via charts/raw
+│   ├── grafana/
+│   │   └── simple-time-service-dashboard.yaml  # ArgoCD ApplicationSet - Grafana dashboard via charts/raw
+│   └── alerts/
+│       ├── simple-time-service-alerts.yaml  # ArgoCD ApplicationSet - PrometheusRule (alert expressions)
+│       └── alertmanager-slack.yaml          # ArgoCD ApplicationSet - AlertmanagerConfig (Slack routing)
 ├── k8s/
 │   └── microservice.yaml          # Kubernetes Deployment + ClusterIP Service
 ├── charts/
@@ -120,6 +141,13 @@ The service is containerized with Docker and runs as a non-root user. It can be 
 │   ├── .dockerignore
 │   └── src/
 │       └── app.py
+├── docs/
+│   └── images/
+│       ├── ArgoCD UI.png              # ArgoCD applications view
+│       ├── Grafana Dashboard.png      # SimpleTimeService Grafana dashboard
+│       └── Alert.png                 # Slack alert notification
+├── secrets/
+│   └── alertmanager-config.example.yaml  # Template for Slack webhook secret (gitignored when filled in)
 ├── scripts/
 │   ├── load_test.py               # Python stdlib load generator (HPA / observability validation)
 │   └── k6-staged.js               # k6 staged ramping-arrival-rate load test
@@ -285,7 +313,7 @@ To deploy in a different region, update `aws_region` and the `azs` list accordin
 
 ### Cluster access - creator gets admin by default
 
-The EKS module is configured with `enable_cluster_creator_admin_permissions = true` ([terraform/modules/eks/main.tf](terraform/modules/eks/main.tf)). This means the AWS IAM identity (user or role) that runs `terraform apply` is automatically granted `system:masters` access to the cluster, giving it full cluster-admin privileges with no additional RBAC setup required.
+The EKS module is configured with `enable_cluster_creator_admin_permissions = true` ([terraform/modules/eks/main.tf](terraform/modules/eks/main.tf)). This grants the IAM identity that runs `terraform apply` cluster-admin style access via the module's creator-admin setting, so no additional access entry or RBAC configuration is required to use `kubectl` immediately after provisioning.
 
 To grant access to other IAM identities, add them as EKS access entries in the EKS module configuration.
 
@@ -517,20 +545,23 @@ The `gitops/` directory implements the **App of Apps** pattern: a single root Ap
 ```
 gitops/
 ├── bootstrap/
-│   └── root-app.yaml                    # Root Application - watches gitops/ recursively
+│   └── root-app.yaml                    # Root Application - syncs all manifests under gitops/
 ├── app/
 │   └── simple-time-service.yaml         # ApplicationSet - deploys Helm chart to each registered cluster
 ├── prometheus/
 │   └── prometheus.yaml                  # ApplicationSet - kube-prometheus-stack (Prometheus + Grafana + Alertmanager)
 ├── metrics-server/
 │   └── metrics-server.yaml              # ApplicationSet - metrics-server (required for HPA)
-└── grafana/
-    └── simple-time-service-dashboard.yaml  # ApplicationSet - Grafana dashboard ConfigMap via charts/raw
+├── grafana/
+│   └── simple-time-service-dashboard.yaml  # ApplicationSet - Grafana dashboard ConfigMap via charts/raw
+└── alerts/
+    ├── simple-time-service-alerts.yaml  # ApplicationSet - PrometheusRule (alert expressions)
+    └── alertmanager-slack.yaml          # ApplicationSet - AlertmanagerConfig (Slack routing)
 ```
 
 ### How it works
 
-1. **Root Application** (`gitops/bootstrap/root-app.yaml`) - deployed manually once. It is configured to watch the `gitops/` directory and create `Application` or `ApplicationSet` resources declared within it.
+1. **Root Application** (`gitops/bootstrap/root-app.yaml`) - deployed manually once. It points at the `gitops/` path in the repo and syncs all `Application` and `ApplicationSet` manifests defined there.
 2. **ApplicationSet** (`gitops/app/simple-time-service.yaml`) - discovered automatically by the root app. Uses the cluster generator to deploy the `charts/simple-time-service` Helm chart to every cluster registered in ArgoCD. HPA is enabled via a Helm value override in this file:
    ```yaml
    hpa:
@@ -539,6 +570,8 @@ gitops/
 3. **Prometheus ApplicationSet** (`gitops/prometheus/prometheus.yaml`) - discovered automatically by the root app. Deploys the `kube-prometheus-stack` Helm chart to every registered cluster, providing Prometheus, Grafana, and Alertmanager in the `monitoring` namespace.
 4. **metrics-server ApplicationSet** (`gitops/metrics-server/metrics-server.yaml`) - discovered automatically by the root app. Deploys `metrics-server` into `kube-system` on every registered cluster, which is a prerequisite for the Kubernetes HPA to collect CPU/memory utilization data.
 5. **grafana-dashboards ApplicationSet** (`gitops/grafana/simple-time-service-dashboard.yaml`) - discovered automatically by the root app. Uses the generic `charts/raw` Helm chart to deploy a Grafana dashboard ConfigMap into the `monitoring` namespace on every registered cluster. The ConfigMap carries the `grafana_dashboard: "1"` label so Grafana's sidecar auto-imports it. A sync-wave annotation (`argocd.argoproj.io/sync-wave: "2"`) ensures this deploys after the `monitoring` namespace exists.
+6. **simple-time-service-alerts ApplicationSet** (`gitops/alerts/simple-time-service-alerts.yaml`) - discovered automatically by the root app. Uses `charts/raw` to deploy a `PrometheusRule` CRD containing alerting expressions for `SimpleTimeServiceDown` and `SimpleTimeServiceHPAAtMaxReplicas`. The rule carries the label `notify: slack` which Prometheus propagates to every alert it fires.
+7. **alertmanager-slack ApplicationSet** (`gitops/alerts/alertmanager-slack.yaml`) - discovered automatically by the root app. Uses `charts/raw` to deploy an `AlertmanagerConfig` CRD that routes alerts with `notify=slack` to a Slack channel. The webhook URL is read from a Kubernetes Secret (`slack-webhook-url`) and never stored in git. This app will show as degraded until the secret is applied.
 
 After bootstrap, changes merged to `main` are automatically picked up by ArgoCD and reconciled according to the configured sync policy.
 
@@ -799,41 +832,10 @@ Average req/sec: 20.57
 
 #### Prerequisites / Installation
 
-| Tool | Minimum version |
-|------|----------------|
-| [k6](https://k6.io/docs/get-started/installation/) | v0.46+ |
-
-**macOS (Homebrew)**
+Requires [k6](https://k6.io/docs/get-started/installation/) v0.46+. Quick install: `brew install k6` (macOS) or see the k6 docs for Linux/Windows options.
 
 ```bash
-brew install k6
-```
-
-**Linux (Debian / Ubuntu)**
-
-```bash
-sudo gpg --no-default-keyring \
-  --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
-  --keyserver hkp://keyserver.ubuntu.com:80 \
-  --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
-
-echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] \
-  https://dl.k6.io/deb stable main" \
-  | sudo tee /etc/apt/sources.list.d/k6.list
-
-sudo apt-get update && sudo apt-get install k6
-```
-
-**Windows (winget)**
-
-```powershell
-winget install k6 --source winget
-```
-
-Verify the install:
-
-```bash
-k6 version
+k6 version  # verify
 ```
 
 #### Usage
@@ -1042,6 +1044,140 @@ curl http://localhost:8080/metrics | grep http_requests_total
 
 ---
 
+## Alerting
+
+Alerting is split across two ArgoCD apps in `gitops/alerts/`:
+
+| App | File | Purpose |
+|-----|------|---------|
+| `simple-time-service-alerts` | `simple-time-service-alerts.yaml` | Deploys the `PrometheusRule` CRD with alert expressions |
+| `alertmanager-slack` | `alertmanager-slack.yaml` | Deploys the `AlertmanagerConfig` CRD for Slack routing |
+
+### PrometheusRules
+
+| Alert | Condition | Severity |
+|-------|-----------|----------|
+| `SimpleTimeServiceDown` | Scrape target unreachable for 1m | critical |
+| `SimpleTimeServiceHPAAtMaxReplicas` | HPA at max replicas (10) for 5m | warning |
+
+The `PrometheusRule` carries the label `notify: slack`, which Prometheus propagates to every alert it fires. The Slack route matches on this label - so any future alert added to the same rule automatically routes to Slack without changing the route config. Any PrometheusRule in any namespace can opt into Slack by adding the same label.
+
+### Slack notifications (optional)
+
+The `alertmanager-slack` app deploys an `AlertmanagerConfig` CRD that:
+- Routes only alerts with `notify=slack` to Slack (ignores unrelated cluster alerts)
+- Reads the webhook URL from a Kubernetes Secret (`slack-webhook-url`) - never from git
+- Uses `alertmanagerConfigMatcherStrategy: None` so the route is not restricted to a single namespace
+
+The stack deploys without the secret - only the `alertmanager-slack` app will show as degraded in ArgoCD. Alertmanager itself runs fine with its default config.
+
+**To enable Slack notifications:**
+
+```bash
+cp secrets/alertmanager-config.example.yaml secrets/slack-webhook-url.yaml
+# Edit secrets/slack-webhook-url.yaml and paste your Slack incoming webhook URL
+kubectl apply -f secrets/slack-webhook-url.yaml -n monitoring
+argocd app sync alertmanager-slack-simple-eks
+```
+
+The Prometheus Operator picks up the secret immediately - no restart required.
+
+> `secrets/slack-webhook-url.yaml` is gitignored. Never commit it.
+
+### EKS false positives suppressed
+
+`KubeSchedulerDown` and `KubeControllerManagerDown` are disabled in `prometheus.yaml`. On EKS the control plane is managed by AWS and is never exposed for Prometheus scraping, so these alerts would fire permanently and add noise.
+
+### Testing the Slack receiver
+
+To verify the Alertmanager → Slack path without touching any cluster resources:
+
+```bash
+# 1. Port-forward Alertmanager
+kubectl port-forward svc/prometheus-kube-prometheus-alertmanager -n monitoring 9093:9093
+
+# 2. Fire a fake alert (in a second terminal)
+curl -X POST http://localhost:9093/api/v2/alerts \
+  -H 'Content-Type: application/json' \
+  -d '[{
+    "labels":      {"alertname":"TestAlert","severity":"critical","notify":"slack"},
+    "annotations": {"summary":"Test alert","description":"Verifying Slack receiver works"}
+  }]'
+```
+
+The alert appears in `#alerts-test` within 30 seconds and auto-resolves after 5 minutes.
+
+> The `notify: slack` label is required - the Slack route only matches alerts carrying that label.
+
+![Slack Alert](docs/images/Alert.png)
+
+<details>
+<summary><strong>Operational notes - silencing, inhibition, and grouping</strong></summary>
+
+### Silencing alerts
+
+Silences temporarily suppress alerts without deleting or modifying rules. Useful during maintenance windows or known incidents.
+
+**Via the Alertmanager UI:**
+
+```bash
+kubectl port-forward svc/prometheus-kube-prometheus-alertmanager -n monitoring 9093:9093
+# Open http://localhost:9093 → Silences → New Silence
+```
+
+**Via the API:**
+
+```bash
+# Silence all simple-time-service alerts for 2 hours
+NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+UNTIL=$(date -u -v+2H +"%Y-%m-%dT%H:%M:%SZ")  # macOS
+# UNTIL=$(date -u -d '+2 hours' +"%Y-%m-%dT%H:%M:%SZ")  # Linux
+
+curl -X POST http://localhost:9093/api/v2/silences \
+  -H 'Content-Type: application/json' \
+  -d "{
+    \"matchers\": [{\"name\":\"notify\",\"value\":\"slack\",\"isRegex\":false}],
+    \"startsAt\":  \"$NOW\",
+    \"endsAt\":    \"$UNTIL\",
+    \"comment\":   \"Maintenance window\",
+    \"createdBy\": \"nabeem\"
+  }"
+```
+
+To silence a specific alert, change the matcher to `alertname`:
+
+```bash
+curl -X POST http://localhost:9093/api/v2/silences \
+  -H 'Content-Type: application/json' \
+  -d "{
+    \"matchers\": [{\"name\":\"alertname\",\"value\":\"SimpleTimeServiceDown\",\"isRegex\":false}],
+    \"startsAt\":  \"$NOW\",
+    \"endsAt\":    \"$UNTIL\",
+    \"comment\":   \"Known issue - investigating\",
+    \"createdBy\": \"nabeem\"
+  }"
+```
+
+Silences are stored in Alertmanager only - not persisted to git and lost if the pod restarts.
+
+### Inhibition rules
+
+Configured automatically by `kube-prometheus-stack`. When a `critical` alert fires for a given `alertname` + `namespace`, Alertmanager suppresses `warning` and `info` alerts for the same pair, preventing alert storms.
+
+### Grouping
+
+Alerts with the same `alertname` + `namespace` are batched into a single Slack message. Timing is controlled by the `AlertmanagerConfig` route:
+
+| Setting | Value | Meaning |
+|---------|-------|---------|
+| `groupWait` | 30s | Wait 30s before sending the first notification |
+| `groupInterval` | 5m | Wait 5m before notifying on an updated group |
+| `repeatInterval` | 4h | Re-notify every 4h if still firing |
+
+</details>
+
+---
+
 ## Microservice - Quick Start (raw manifests)
 
 ```bash
@@ -1215,11 +1351,11 @@ image: docker.io/<your-dockerhub-username>/simple-time-service:latest
 ### 1 - Remove ArgoCD-managed applications
 
 ```bash
-# Delete the root app - ArgoCD is expected to prune child apps and their managed resources when prune: true is enabled
+# Delete the root app
 kubectl delete -f gitops/bootstrap/root-app.yaml
 ```
 
-Wait for ArgoCD to finish pruning. With `prune: true` in the sync policy, ArgoCD should remove the managed resources and namespaces - verify in the UI or with `kubectl get ns` that they are gone before proceeding.
+With the current sync policy (`prune: true`) and ArgoCD finalizer behavior, child apps and their managed resources should be cleaned up - but verify in the UI or with `kubectl get ns` before uninstalling ArgoCD, as behavior can vary depending on finalizer state.
 
 ### 2 - Uninstall ArgoCD
 
@@ -1274,7 +1410,7 @@ When enabled, it applies a default-deny posture and then opens only the minimum 
 | Egress | Port 53 UDP/TCP | DNS resolution |
 | Everything else | Denied | The app makes no outbound calls |
 
-> **CNI requirement:** NetworkPolicy enforcement requires a CNI plugin that supports it. The Terraform EKS module in this repo enables the VPC CNI Network Policy controller via `enableNetworkPolicy: "true"` in the `vpc-cni` add-on configuration (`terraform/modules/eks/main.tf`) - no extra steps needed.
+> **CNI requirement:** NetworkPolicy enforcement requires a CNI plugin that supports it. This repo enables the VPC CNI Network Policy controller via `enableNetworkPolicy: "true"` in the `vpc-cni` add-on configuration (`terraform/modules/eks/main.tf`), so no additional Terraform changes are required.
 
 Verify the policy after ArgoCD syncs:
 
@@ -1336,3 +1472,5 @@ Metrics are emitted by [`prometheus-fastapi-instrumentator`](https://github.com/
 | `kubectl top pods` returns `error: Metrics API not available` | `metrics-server` is not running or not yet ready. Check with `kubectl get pods -n kube-system -l app.kubernetes.io/name=metrics-server`. If ArgoCD has not synced yet, trigger a manual sync. |
 | HPA shows `<unknown>/70%` for CPU utilization | `metrics-server` is not available or the pods have no CPU requests set. Verify `kubectl top pods -n simple-time-service` works and that `resources.requests.cpu` is defined in `values.yaml`. |
 | HPA is not scaling despite high load | Confirm `hpa.enabled: true` is set in the ArgoCD ApplicationSet override ([simple-time-service.yaml](gitops/app/simple-time-service.yaml)) and that ArgoCD has synced. Check `kubectl describe hpa simple-time-service -n simple-time-service` for events. |
+| Slack alerts not arriving | 1. Confirm the secret exists: `kubectl get secret slack-webhook-url -n monitoring`. 2. Check the `AlertmanagerConfig` is loaded: `kubectl describe alertmanagerconfig slack -n monitoring`. 3. Verify the Prometheus Operator picked it up: `kubectl logs -n monitoring deployment/prometheus-kube-prometheus-operator \| grep -i slack`. 4. Ensure the alert label `notify: slack` is present - the route only matches alerts carrying that label. |
+| `alertmanager-slack` ArgoCD app is degraded | The `slack-webhook-url` secret is missing. Apply it with `kubectl apply -f secrets/slack-webhook-url.yaml -n monitoring` then run `argocd app sync alertmanager-slack-simple-eks`. |

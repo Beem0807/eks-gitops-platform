@@ -1,0 +1,67 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: alertmanager-slack
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - clusters: {}
+  template:
+    metadata:
+      name: 'alertmanager-slack-{{.nameNormalized}}'
+      annotations:
+        argocd.argoproj.io/sync-wave: "4"
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/Beem0807/eks-gitops-platform.git
+        targetRevision: main
+        path: charts/raw
+        helm:
+          releaseName: alertmanager-slack
+          values: |
+            resources:
+              - apiVersion: monitoring.coreos.com/v1alpha1
+                kind: AlertmanagerConfig
+                metadata:
+                  name: slack
+                  namespace: monitoring
+                spec:
+                  route:
+                    receiver: slack
+                    groupBy: [alertname, namespace]
+                    groupWait: 30s
+                    groupInterval: 5m
+                    repeatInterval: 4h
+                    matchers:
+                      - name: notify
+                        matchType: =
+                        value: slack
+                  receivers:
+                    - name: slack
+                      slackConfigs:
+                        - apiURL:
+                            name: slack-webhook-url
+                            key: url
+                          channel: '#alerts-test'
+                          sendResolved: true
+                          title: >-
+                            [{{ `{{` }} .Status | toUpper {{ `}}` }}] {{ `{{` }} .CommonLabels.alertname {{ `}}` }}
+                          text: >-
+                            {{ `{{` }} range .Alerts {{ `}}` }}
+                            *Summary:* {{ `{{` }} .Annotations.summary {{ `}}` }}
+                            *Description:* {{ `{{` }} .Annotations.description {{ `}}` }}
+                            *Severity:* {{ `{{` }} .Labels.severity {{ `}}` }}
+                            {{ `{{` }} end {{ `}}` }}
+      destination:
+        server: '{{.server}}'
+        namespace: monitoring
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true

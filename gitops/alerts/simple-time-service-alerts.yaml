@@ -1,0 +1,73 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: simple-time-service-alerts
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - clusters: {}
+  template:
+    metadata:
+      name: 'simple-time-service-alerts-{{.nameNormalized}}'
+      annotations:
+        argocd.argoproj.io/sync-wave: "3"
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/Beem0807/eks-gitops-platform.git
+        targetRevision: main
+        path: charts/raw
+        helm:
+          releaseName: simple-time-service-alerts
+          values: |
+            resources:
+              - apiVersion: monitoring.coreos.com/v1
+                kind: PrometheusRule
+                metadata:
+                  name: simple-time-service
+                  namespace: monitoring
+                  labels:
+                    release: prometheus
+                    notify: slack
+                spec:
+                  groups:
+                    - name: simple-time-service
+                      rules:
+                        - alert: SimpleTimeServiceDown
+                          expr: min(up{job=~".*simple-time-service.*"}) == 0
+                          for: 1m
+                          labels:
+                            severity: critical
+                          annotations:
+                            summary: "SimpleTimeService scrape target is down"
+                            description: "Prometheus cannot reach the SimpleTimeService metrics endpoint. At least one instance has been unreachable for more than 1 minute."
+
+                        - alert: SimpleTimeServiceHPAAtMaxReplicas
+                          expr: |
+                            kube_horizontalpodautoscaler_status_current_replicas{
+                              namespace="simple-time-service",
+                              horizontalpodautoscaler="simple-time-service"
+                            }
+                            >=
+                            kube_horizontalpodautoscaler_spec_max_replicas{
+                              namespace="simple-time-service",
+                              horizontalpodautoscaler="simple-time-service"
+                            }
+                          for: 5m
+                          labels:
+                            severity: warning
+                          annotations:
+                            summary: "SimpleTimeService HPA has been at max replicas for 5 minutes"
+                            description: "The HPA for SimpleTimeService has been running at its maximum replica count for more than 5 minutes. Consider raising maxReplicas or investigating sustained high load."
+      destination:
+        server: '{{.server}}'
+        namespace: monitoring
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
