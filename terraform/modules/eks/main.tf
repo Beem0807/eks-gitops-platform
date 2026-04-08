@@ -22,9 +22,20 @@ module "eks" {
     vpc-cni = {
       before_compute = true
       most_recent    = true
-      configuration_values = jsonencode({
-        enableNetworkPolicy = "true"
-      })
+      # configuration_values = jsonencode({
+      #   enableNetworkPolicy = "true"
+      # })
+    }
+  }
+
+  node_security_group_additional_rules = {
+    ingress_nlb_nodeports = {
+      description = "Allow NLB to reach NodePorts (NLB preserves source IP)"
+      protocol    = "tcp"
+      from_port   = 30000
+      to_port     = 32767
+      type        = "ingress"
+      cidr_blocks = ["0.0.0.0/0"]
     }
   }
 

@@ -1,0 +1,14 @@
+aws_region           = "ap-south-1"
+cluster_name         = "simple-eks"
+vpc_name             = "eks-vpc"
+vpc_cidr             = "10.0.0.0/24"
+azs                  = ["ap-south-1a", "ap-south-1b"]
+public_subnets       = ["10.0.0.0/26", "10.0.0.64/26"]
+private_subnets      = ["10.0.0.128/26", "10.0.0.192/26"]
+instance_type        = "m6a.large"
+node_desired_size    = 2
+node_min_size        = 2
+node_max_size        = 2
+app_namespace        = "simple-time-service"
+app_image_repository = "docker.io/nabeemdev/simple-time-service"
+app_image_tag        = "v1"

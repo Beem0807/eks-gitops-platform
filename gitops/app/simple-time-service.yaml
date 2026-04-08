@@ -34,7 +34,7 @@ spec:
             hpa:
               enabled: true
             networkPolicy:
-              enabled: true
+              enabled: false
       destination:
         server: '{{.server}}'
         namespace: simple-time-service

@@ -212,7 +212,7 @@ The service is containerized with Docker and runs as a non-root user. It can be 
 | NAT Gateway | Single NAT gateway so private-subnet nodes can reach the internet |
 | EKS cluster | Kubernetes 1.33, API endpoint publicly accessible (no CIDR restriction - acceptable for demos, but restrict `public_access_cidrs` in production) |
 | Managed node group | `node_desired_size` × `m6a.large` on-demand nodes placed on private subnets only |
-| EKS add-ons | `coredns`, `kube-proxy`, `vpc-cni` (with Network Policy controller enabled) managed by the EKS module |
+| EKS add-ons | `coredns`, `kube-proxy`, `vpc-cni` (Network Policy controller **disabled by default** — see [Network Policy](#network-policy)) managed by the EKS module |
 
 The EKS module used is [`terraform-aws-modules/eks/aws`](https://registry.terraform.io/modules/terraform-aws-modules/eks/aws/latest) and the VPC module is [`terraform-aws-modules/vpc/aws`](https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws/latest).
 
@@ -776,6 +776,54 @@ kubectl get hpa -n simple-time-service -w
 ```
 
 > For a lightweight service like this, CPU utilization rises slowly under light traffic. You may need to sustain the load for a short period before the HPA triggers a scale-out event. Scaling down after load stops is intentionally conservative - the default stabilization window is 5 minutes, configurable via `hpa.scaleDown.stabilizationWindowSeconds`.
+
+---
+
+## Network Policy
+
+Network Policy enforcement is **disabled by default**. Enabling it is a two-step process: first the VPC CNI add-on must be configured to run the Network Policy controller (Terraform change), and then the NetworkPolicy resource itself must be deployed (ArgoCD change).
+
+### Step 1 — Enable the Network Policy controller in the EKS add-on
+
+Open [terraform/modules/eks/main.tf](terraform/modules/eks/main.tf) and uncomment the `configuration_values` block inside the `vpc-cni` add-on:
+
+```hcl
+vpc-cni = {
+  before_compute = true
+  most_recent    = true
+  configuration_values = jsonencode({
+    enableNetworkPolicy = "true"
+  })
+}
+```
+
+Then apply the change:
+
+```bash
+cd terraform
+terraform apply
+```
+
+This patches the `vpc-cni` managed add-on to start the Network Policy controller as a sidecar on each node. Without this, any `NetworkPolicy` resource created in the cluster is silently ignored.
+
+### Step 2 — Enable the NetworkPolicy resource in the ArgoCD ApplicationSet
+
+Open [gitops/app/simple-time-service.yaml](gitops/app/simple-time-service.yaml) and change `networkPolicy.enabled` from `false` to `true` in the Helm values override:
+
+```yaml
+helm:
+  values: |
+    networkPolicy:
+      enabled: true
+```
+
+Commit and push to `main`. ArgoCD will detect the change within the default polling interval (3 minutes) and deploy the `NetworkPolicy` resource, which restricts ingress to traffic from the `monitoring` namespace (Prometheus scraping) and allows all egress.
+
+### Verify
+
+```bash
+kubectl get networkpolicy -n simple-time-service
+```
 
 ---
 
