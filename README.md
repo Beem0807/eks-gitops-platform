@@ -512,6 +512,8 @@ source:
 
 The `gitops/` directory implements the **App of Apps** pattern: a single root Application bootstraps ArgoCD, which then discovers and reconciles all other applications declared in the repo.
 
+![ArgoCD Applications](docs/images/ArgoCD%20UI.png)
+
 ```
 gitops/
 ├── bootstrap/
@@ -943,6 +945,8 @@ kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 909
 Open [http://localhost:9090](http://localhost:9090) to query metrics directly.
 
 ### SimpleTimeService Grafana dashboard
+
+![Grafana Dashboard](docs/images/Grafana%20Dashboard.png)
 
 A pre-built dashboard is automatically provisioned into Grafana via the `gitops/grafana/simple-time-service-dashboard.yaml` ApplicationSet. It uses the generic `charts/raw` Helm chart to deploy a ConfigMap with label `grafana_dashboard: "1"` into the `monitoring` namespace. Grafana's sidecar detects the label and imports the dashboard without any manual steps.
 
