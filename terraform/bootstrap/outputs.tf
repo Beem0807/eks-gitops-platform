@@ -8,8 +8,8 @@ output "cluster_name" {
   value       = module.eks.cluster_name
 }
 
-output "application_load_balancer_hostname" {
-  description = "Public hostname of the application load balancer"
+output "application_nlb_hostname" {
+  description = "Public hostname of the NLB"
   value       = try(data.kubernetes_service_v1.simple_time_service.status[0].load_balancer[0].ingress[0].hostname, null)
 }
 

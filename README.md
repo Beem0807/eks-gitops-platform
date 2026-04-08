@@ -15,14 +15,41 @@ This repository contains six platform components plus a shared utility chart:
 
 ---
 
+## Why EKS?
+
+EKS demonstrates the full container deployment lifecycle using Terraform: VPC design with public and private subnets, private compute placement for worker nodes, and public application exposure through a load balancer. It also allows the solution to be extended naturally with GitOps, monitoring, alerting, autoscaling, and centralized logging - which are included here as additional demonstrations of cloud-native operational practices.
+
+---
+
 ## Quick demo
 
-```bash
-# 1. Provision infrastructure (infrastructure + app in one step)
-cd terraform/bootstrap && terraform init && terraform apply
-# OR: cd terraform && terraform init && terraform apply  (infrastructure only)
+### Bootstrap path
 
-# 2. Authenticate kubectl (use the same IAM identity that ran apply)
+Provisions VPC, EKS, and the SimpleTimeService Helm release in one step. The app is immediately reachable on a public NLB - no ArgoCD required.
+
+```bash
+# 1. Provision infrastructure + app
+cd terraform/bootstrap && terraform init && terraform apply
+
+# 2. Authenticate kubectl
+aws eks update-kubeconfig --region ap-south-1 --name simple-eks
+
+# 3. Verify the public endpoint (apply waits until /health returns 200 - endpoint is ready immediately)
+terraform output -raw application_url
+curl $(terraform output -raw application_url)
+```
+
+---
+
+### GitOps platform path
+
+Provisions the infrastructure only, then hands off all application and platform management to ArgoCD.
+
+```bash
+# 1. Provision infrastructure
+cd terraform && terraform init && terraform apply
+
+# 2. Authenticate kubectl
 aws eks update-kubeconfig --region ap-south-1 --name simple-eks
 
 # 3. Install ArgoCD
@@ -58,8 +85,8 @@ A reviewer can verify the full stack is working in under a minute using these ch
 | # | What to check | Command |
 |---|---------------|---------|
 | 1 | Terraform provisioned the cluster | `kubectl get nodes` - all nodes `Ready` |
-| 2 | ArgoCD root app synced | Check UI at `https://localhost:8080` or run `argocd app get root-app` - `Synced / Healthy` |
-| 3 | Service is responding | `curl http://127.0.0.1:8080/` - returns `timestamp` + `ip` JSON |
+| 2 | ArgoCD root app synced *(GitOps path)* | Check UI at `https://localhost:8080` or run `argocd app get root-app` - `Synced / Healthy` |
+| 3 | Service is responding | **bootstrap:** `curl http://$(terraform -chdir=terraform/bootstrap output -raw application_nlb_hostname)/` · **GitOps:** `kubectl port-forward svc/simple-time-service -n simple-time-service 8080:80` then `curl http://127.0.0.1:8080/` - returns `timestamp` + `ip` JSON |
 | 4 | Prometheus is scraping the service | After port-forwarding Prometheus (`kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 9090:9090`), open `http://localhost:9090/targets` - `simple-time-service` target `UP` |
 | 5 | Grafana dashboard is populated | Open `http://localhost:3000` - SimpleTimeService dashboard shows live data |
 | 6 | HPA scales under load | `kubectl get hpa -n simple-time-service -w` while running `python3 scripts/load_test.py` |
@@ -75,7 +102,7 @@ These choices are intentional for a demo environment:
 
 - Single NAT gateway to reduce cost (use one per AZ in production).
 - EKS API endpoint is publicly accessible - acceptable for demos; restrict `public_access_cidrs` in production.
-- No ingress controller is included; services are accessed via `kubectl port-forward`.
+- No ingress controller is included. In the GitOps path, services are typically accessed via `kubectl port-forward`; in the bootstrap path, SimpleTimeService is exposed publicly through an NLB-backed `LoadBalancer` service.
 - ArgoCD is installed manually once; everything else is GitOps-managed from that point.
 - Prometheus Operator TLS and admission webhooks are disabled to simplify bootstrap reliability.
 
@@ -221,7 +248,7 @@ The service is containerized with Docker and runs as a non-root user. It can be 
 | EKS cluster | Kubernetes 1.33, API endpoint publicly accessible (no CIDR restriction - acceptable for demos, but restrict `public_access_cidrs` in production) |
 | Managed node group | `node_desired_size` × `m6a.large` on-demand nodes placed on private subnets only |
 | Node security group | Additional inbound rule: TCP 30000–32767 from `0.0.0.0/0` so the NLB can reach NodePorts (NLB preserves the source IP, so the security group must allow the full public range) |
-| EKS add-ons | `coredns`, `kube-proxy`, `vpc-cni` (Network Policy controller **disabled by default** — see [Network Policy](#network-policy)) managed by the EKS module |
+| EKS add-ons | `coredns`, `kube-proxy`, `vpc-cni` (Network Policy controller **disabled by default** - see [Network Policy](#network-policy)) managed by the EKS module |
 
 The EKS module used is [`terraform-aws-modules/eks/aws`](https://registry.terraform.io/modules/terraform-aws-modules/eks/aws/latest) and the VPC module is [`terraform-aws-modules/vpc/aws`](https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws/latest).
 
@@ -375,7 +402,9 @@ This removes all AWS resources created by Terraform. Confirm with `yes` when pro
 
 ## Bootstrap - one-step infrastructure and app deployment
 
-`terraform/bootstrap/` is an alternative Terraform root module that provisions the full stack — VPC, EKS cluster, Kubernetes namespace, and the SimpleTimeService Helm release — in a single `terraform apply`. Use it when you want to stand up the complete environment without separately running Terraform and then ArgoCD.
+`terraform/bootstrap/` is an alternative Terraform root module that provisions the full stack - VPC, EKS cluster, Kubernetes namespace, and the SimpleTimeService Helm release - in a single `terraform apply`. Use it when you want to stand up the complete environment without separately running Terraform and then ArgoCD.
+
+> **Portability note:** The bootstrap module uses `local-exec` provisioners that shell out to `aws`, `kubectl`, `curl`, and `nslookup`. It works well on a prepared local machine with these tools installed, but it is not purely provider-driven Terraform. If you need a fully portable, CI-friendly apply, run the root `terraform/` module and handle app deployment separately.
 
 ### What the bootstrap module does differently from `terraform/`
 
@@ -410,12 +439,12 @@ After a successful apply, the public NLB hostname is printed as `application_url
 Outputs:
 
 application_url = "http://<nlb-hostname>"
-application_load_balancer_hostname = "<nlb-hostname>"
+application_nlb_hostname = "<nlb-hostname>"
 cluster_name = "simple-eks"
 vpc_id = "vpc-..."
 ```
 
-It typically takes **2–3 minutes** after the NLB hostname appears before DNS propagates and the endpoint becomes reachable.
+Terraform polls the EKS API server every 15 seconds (up to 5 minutes) before proceeding with the namespace and Helm release, so the apply will not continue until the cluster is genuinely reachable. Once the Helm release is deployed, Terraform waits for the NLB hostname to be assigned (up to 10 minutes) and then validates the service by polling `GET /health` every 15 seconds (up to 10 minutes) until it returns HTTP 200. The apply only completes successfully once the endpoint is confirmed healthy - no manual wait is required.
 
 ### Node security group - NLB NodePort access
 
@@ -434,7 +463,7 @@ node_security_group_additional_rules = {
 }
 ```
 
-An NLB operates at Layer 4 and does **not** replace the source IP with its own — traffic arriving at nodes carries the original client IP. Because of this, the source address is unpredictable and the security group must allow the full public range (`0.0.0.0/0`) on the NodePort range. Without this rule the NLB health checks and forwarded traffic are silently dropped by the node security group, making the service unreachable even though the NLB itself shows healthy targets.
+An NLB operates at Layer 4 and does **not** replace the source IP with its own - traffic arriving at nodes carries the original client IP. Because of this, the source address is unpredictable and the security group must allow the full public range (`0.0.0.0/0`) on the NodePort range. Without this rule the NLB health checks and forwarded traffic are silently dropped by the node security group, making the service unreachable even though the NLB itself shows healthy targets.
 
 > In production, restrict this range to the NLB's subnet CIDRs if your NLB is internal, or retain `0.0.0.0/0` only for internet-facing NLBs where client IPs are genuinely arbitrary.
 
@@ -480,7 +509,11 @@ helm install simple-time-service charts/simple-time-service --namespace simple-t
 ### Upgrade
 
 ```bash
+# In the default namespace
 helm upgrade simple-time-service charts/simple-time-service
+
+# In a custom namespace (e.g. simple-time-service)
+helm upgrade simple-time-service charts/simple-time-service --namespace simple-time-service
 ```
 
 ### Verify the deployment
@@ -872,7 +905,7 @@ kubectl get hpa -n simple-time-service -w
 
 Network Policy enforcement is **disabled by default**. Enabling it is a two-step process: first the VPC CNI add-on must be configured to run the Network Policy controller (Terraform change), and then the NetworkPolicy resource itself must be deployed (ArgoCD change).
 
-### Step 1 — Enable the Network Policy controller in the EKS add-on
+### Step 1 - Enable the Network Policy controller in the EKS add-on
 
 Open [terraform/modules/eks/main.tf](terraform/modules/eks/main.tf) and uncomment the `configuration_values` block inside the `vpc-cni` add-on:
 
@@ -895,7 +928,7 @@ terraform apply
 
 This patches the `vpc-cni` managed add-on to start the Network Policy controller as a sidecar on each node. Without this, any `NetworkPolicy` resource created in the cluster is silently ignored.
 
-### Step 2 — Enable the NetworkPolicy resource in the ArgoCD ApplicationSet
+### Step 2 - Enable the NetworkPolicy resource in the ArgoCD ApplicationSet
 
 Open [gitops/app/simple-time-service.yaml](gitops/app/simple-time-service.yaml) and change `networkPolicy.enabled` from `false` to `true` in the Helm values override:
 
@@ -1675,7 +1708,7 @@ When enabled, it applies a default-deny posture and then opens only the minimum 
 | Egress | Port 53 UDP/TCP | DNS resolution |
 | Everything else | Denied | The app makes no outbound calls |
 
-> **CNI requirement:** NetworkPolicy enforcement requires a CNI plugin that supports it. This repo enables the VPC CNI Network Policy controller via `enableNetworkPolicy: "true"` in the `vpc-cni` add-on configuration (`terraform/modules/eks/main.tf`), so no additional Terraform changes are required.
+> **CNI requirement:** NetworkPolicy enforcement requires a CNI plugin that supports it. The VPC CNI Network Policy controller is **disabled by default** in this repo — `enableNetworkPolicy` is commented out in `terraform/modules/eks/main.tf`. Follow Step 1 in the [Network Policy](#network-policy) section to enable it before deploying a NetworkPolicy resource.
 
 Verify the policy after ArgoCD syncs:
 

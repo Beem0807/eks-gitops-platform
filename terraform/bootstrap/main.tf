@@ -34,11 +34,34 @@ resource "null_resource" "update_kubeconfig" {
 }
 
 # EKS marks the cluster Active before its API server DNS record has fully
-# propagated. Without this wait the kubernetes/helm providers fail with
-# "no such host" immediately after the kubeconfig is updated.
-resource "time_sleep" "wait_for_dns" {
-  create_duration = "60s"
-  depends_on      = [null_resource.update_kubeconfig]
+# propagated. Poll until the specific cluster endpoint resolves (up to 10 minutes).
+# NOTE: we poll module.eks.cluster_endpoint directly (not self.triggers) to
+# always check the live endpoint, avoiding stale-trigger false-positives.
+resource "null_resource" "wait_for_api" {
+  triggers = {
+    cluster_endpoint = module.eks.cluster_endpoint
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOF
+      ENDPOINT="${module.eks.cluster_endpoint}"
+      HOSTNAME=$(echo "$ENDPOINT" | sed 's|https://||' | sed 's|/||g')
+      echo "Waiting for EKS API server DNS to propagate (host: $HOSTNAME)..."
+      for i in $(seq 1 40); do
+        if nslookup "$HOSTNAME" > /dev/null 2>&1; then
+          echo "DNS resolved on attempt $i. Sleeping 30s for propagation to stabilise..."
+          sleep 30
+          echo "Done."
+          exit 0
+        fi
+        echo "Attempt $i/40: DNS not yet resolvable, retrying in 15s..."
+        sleep 15
+      done
+      echo "ERROR: EKS API server did not become DNS-resolvable within 10 minutes" && exit 1
+    EOF
+  }
+
+  depends_on = [module.eks]
 }
 
 resource "kubernetes_namespace" "app" {
@@ -46,7 +69,7 @@ resource "kubernetes_namespace" "app" {
     name = var.app_namespace
   }
 
-  depends_on = [time_sleep.wait_for_dns]
+  depends_on = [null_resource.wait_for_api]
 }
 
 resource "helm_release" "simple_time_service" {
@@ -85,11 +108,65 @@ resource "helm_release" "simple_time_service" {
   ]
 }
 
+# Wait for the NLB to be provisioned and assigned a hostname before reading it.
+# The cloud controller takes 1-3 minutes to create the NLB after the Service is applied.
+resource "null_resource" "wait_for_lb" {
+  triggers = {
+    helm_release = helm_release.simple_time_service.status
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOF
+      echo "Waiting for NLB hostname to be assigned..."
+      for i in $(seq 1 40); do
+        HOSTNAME=$(kubectl get svc simple-time-service \
+          -n ${var.app_namespace} \
+          -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+        if [ -n "$HOSTNAME" ]; then
+          echo "NLB hostname assigned on attempt $i: $HOSTNAME"
+          exit 0
+        fi
+        echo "Attempt $i/40: NLB not ready yet, retrying in 15s..."
+        sleep 15
+      done
+      echo "ERROR: NLB hostname was not assigned within 10 minutes" && exit 1
+    EOF
+  }
+
+  depends_on = [helm_release.simple_time_service]
+}
+
 data "kubernetes_service_v1" "simple_time_service" {
   metadata {
     name      = "simple-time-service"
     namespace = var.app_namespace
   }
 
-  depends_on = [helm_release.simple_time_service]
+  depends_on = [null_resource.wait_for_lb]
+}
+
+# Validate the service is healthy by hitting the /health endpoint on the NLB.
+resource "null_resource" "validate_health" {
+  triggers = {
+    helm_release = helm_release.simple_time_service.status
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOF
+      HOSTNAME="${data.kubernetes_service_v1.simple_time_service.status[0].load_balancer[0].ingress[0].hostname}"
+      echo "Validating /health endpoint at http://$HOSTNAME/health ..."
+      for i in $(seq 1 40); do
+        HTTP_CODE=$(curl -s -o /dev/null -w "%%{http_code}" --max-time 5 "http://$HOSTNAME/health" 2>/dev/null || true)
+        if [ "$HTTP_CODE" = "200" ]; then
+          echo "Health check passed on attempt $i (HTTP $HTTP_CODE)"
+          exit 0
+        fi
+        echo "Attempt $i/40: /health returned '$HTTP_CODE', retrying in 15s..."
+        sleep 15
+      done
+      echo "ERROR: /health did not return 200 within 10 minutes" && exit 1
+    EOF
+  }
+
+  depends_on = [data.kubernetes_service_v1.simple_time_service]
 }
