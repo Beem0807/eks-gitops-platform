@@ -1,12 +1,13 @@
 # EKS GitOps Platform
 
-This repository contains five platform components plus a shared utility chart:
+This repository contains six platform components plus a shared utility chart:
 
 1. **SimpleTimeService** - a minimal Python microservice containerized with Docker and deployable to Kubernetes.
 2. **Terraform infrastructure** - an AWS VPC and EKS cluster provisioned with Terraform.
 3. **GitOps platform** - ArgoCD running on the EKS cluster, managing deployments via the App of Apps pattern.
 4. **Monitoring and Alerting** - Prometheus, Grafana, and Alertmanager deployed via ArgoCD using the `kube-prometheus-stack` Helm chart, with a pre-built Grafana dashboard auto-provisioned via `charts/raw`, and PrometheusRule-based alerts routed to Slack via an `AlertmanagerConfig` CRD.
 5. **Autoscaling** - `metrics-server` deployed via ArgoCD enabling HPA-based horizontal pod autoscaling for SimpleTimeService.
+6. **Log Aggregation** - Loki deployed in single-binary mode (demo topology, ephemeral storage), Fluent Bit running as a DaemonSet to collect and forward container logs, and a Grafana Loki datasource auto-provisioned via `charts/raw` so logs are queryable in Grafana immediately after bootstrap.
 
 **Utility:** `charts/raw` - a reusable generic Helm chart for deploying arbitrary Kubernetes resources through the same ApplicationSet pattern used by the platform components above.
 
@@ -62,6 +63,8 @@ A reviewer can verify the full stack is working in under a minute using these ch
 | 5 | Grafana dashboard is populated | Open `http://localhost:3000` - SimpleTimeService dashboard shows live data |
 | 6 | HPA scales under load | `kubectl get hpa -n simple-time-service -w` while running `python3 scripts/load_test.py` |
 | 7 | Slack alert is delivered | Fire test alert via curl (see [Testing the Slack receiver](#testing-the-slack-receiver)) - message appears in `#alerts-test` |
+| 8 | Loki API reachable | `kubectl port-forward svc/loki-gateway -n logging 3100:80` → `curl 'http://localhost:3100/loki/api/v1/labels'` returns a non-empty response |
+| 9 | Logs queryable in Grafana | Open `http://localhost:3000` → Explore → select **Loki** datasource → run `{namespace="simple-time-service"}` |
 
 ---
 
@@ -113,9 +116,14 @@ The service is containerized with Docker and runs as a non-root user. It can be 
 │   │   └── metrics-server.yaml              # ArgoCD ApplicationSet - metrics-server (required for HPA)
 │   ├── grafana/
 │   │   └── simple-time-service-dashboard.yaml  # ArgoCD ApplicationSet - Grafana dashboard via charts/raw
-│   └── alerts/
-│       ├── simple-time-service-alerts.yaml  # ArgoCD ApplicationSet - PrometheusRule (alert expressions)
-│       └── alertmanager-slack.yaml          # ArgoCD ApplicationSet - AlertmanagerConfig (Slack routing)
+│   ├── alerts/
+│   │   ├── simple-time-service-alerts.yaml  # ArgoCD ApplicationSet - PrometheusRule (alert expressions)
+│   │   └── alertmanager-slack.yaml          # ArgoCD ApplicationSet - AlertmanagerConfig (Slack routing)
+│   ├── loki/
+│   │   ├── loki.yaml                        # ArgoCD ApplicationSet - Loki (single-binary log store)
+│   │   └── grafana-loki-datasource.yaml     # ArgoCD ApplicationSet - Grafana Loki datasource ConfigMap via charts/raw
+│   └── fluent-bit/
+│       └── fluent-bit.yaml                  # ArgoCD ApplicationSet - Fluent Bit DaemonSet (log collector → Loki)
 ├── k8s/
 │   └── microservice.yaml          # Kubernetes Deployment + ClusterIP Service
 ├── charts/
@@ -145,7 +153,8 @@ The service is containerized with Docker and runs as a non-root user. It can be 
 │   └── images/
 │       ├── ArgoCD UI.png              # ArgoCD applications view
 │       ├── Grafana Dashboard.png      # SimpleTimeService Grafana dashboard
-│       └── Alert.png                 # Slack alert notification
+│       ├── Alert.png                 # Slack alert notification
+│       └── logs.png                  # Loki logs in Grafana Explore
 ├── secrets/
 │   └── alertmanager-config.example.yaml  # Template for Slack webhook secret (gitignored when filled in)
 ├── scripts/
@@ -554,9 +563,14 @@ gitops/
 │   └── metrics-server.yaml              # ApplicationSet - metrics-server (required for HPA)
 ├── grafana/
 │   └── simple-time-service-dashboard.yaml  # ApplicationSet - Grafana dashboard ConfigMap via charts/raw
-└── alerts/
-    ├── simple-time-service-alerts.yaml  # ApplicationSet - PrometheusRule (alert expressions)
-    └── alertmanager-slack.yaml          # ApplicationSet - AlertmanagerConfig (Slack routing)
+├── alerts/
+│   ├── simple-time-service-alerts.yaml  # ApplicationSet - PrometheusRule (alert expressions)
+│   └── alertmanager-slack.yaml          # ApplicationSet - AlertmanagerConfig (Slack routing)
+├── loki/
+│   ├── loki.yaml                        # ApplicationSet - Loki single-binary log store (logging namespace)
+│   └── grafana-loki-datasource.yaml     # ApplicationSet - Grafana Loki datasource ConfigMap via charts/raw
+└── fluent-bit/
+    └── fluent-bit.yaml                  # ApplicationSet - Fluent Bit DaemonSet (log collector → Loki)
 ```
 
 ### How it works
@@ -572,6 +586,9 @@ gitops/
 5. **grafana-dashboards ApplicationSet** (`gitops/grafana/simple-time-service-dashboard.yaml`) - discovered automatically by the root app. Uses the generic `charts/raw` Helm chart to deploy a Grafana dashboard ConfigMap into the `monitoring` namespace on every registered cluster. The ConfigMap carries the `grafana_dashboard: "1"` label so Grafana's sidecar auto-imports it. A sync-wave annotation (`argocd.argoproj.io/sync-wave: "2"`) ensures this deploys after the `monitoring` namespace exists.
 6. **simple-time-service-alerts ApplicationSet** (`gitops/alerts/simple-time-service-alerts.yaml`) - discovered automatically by the root app. Uses `charts/raw` to deploy a `PrometheusRule` CRD containing alerting expressions for `SimpleTimeServiceDown` and `SimpleTimeServiceHPAAtMaxReplicas`. The rule carries the label `notify: slack` which Prometheus propagates to every alert it fires.
 7. **alertmanager-slack ApplicationSet** (`gitops/alerts/alertmanager-slack.yaml`) - discovered automatically by the root app. Uses `charts/raw` to deploy an `AlertmanagerConfig` CRD that routes alerts with `notify=slack` to a Slack channel. The webhook URL is read from a Kubernetes Secret (`slack-webhook-url`) and never stored in git. This app will show as degraded until the secret is applied.
+8. **loki ApplicationSet** (`gitops/loki/loki.yaml`) - discovered automatically by the root app. Deploys the [Loki Helm chart](https://grafana-community.github.io/helm-charts) in `SingleBinary` mode into the `logging` namespace. Configured with filesystem storage and a single replica (suitable for demos). A sync-wave annotation (`argocd.argoproj.io/sync-wave: "3"`) ensures Loki is running before Fluent Bit and the datasource are applied.
+9. **fluent-bit ApplicationSet** (`gitops/fluent-bit/fluent-bit.yaml`) - discovered automatically by the root app. Deploys Fluent Bit as a DaemonSet in the `logging` namespace. It tails `/var/log/containers/*.log` on every node, enriches log entries with Kubernetes metadata (namespace, pod, container), and forwards them to Loki at `http://loki-gateway.logging.svc.cluster.local`. Sync-wave `"4"` ensures it deploys after Loki.
+10. **grafana-loki-datasource ApplicationSet** (`gitops/loki/grafana-loki-datasource.yaml`) - discovered automatically by the root app. Uses `charts/raw` to deploy a ConfigMap with label `grafana_datasource: "1"` into the `monitoring` namespace. Grafana's sidecar detects this label and provisions a Loki datasource pointing at `http://loki-gateway.logging.svc.cluster.local`. Sync-wave `"4"` ensures the datasource is registered only after Loki is ready.
 
 After bootstrap, changes merged to `main` are automatically picked up by ArgoCD and reconciled according to the configured sync policy.
 
@@ -887,7 +904,7 @@ The `gitops/prometheus/prometheus.yaml` ApplicationSet deploys the [`kube-promet
 | Component | Details |
 |-----------|---------|
 | Prometheus | Metrics collection with a 7-day retention window |
-| Grafana | Dashboards UI, auto-provisioned with the Prometheus data source |
+| Grafana | Dashboards UI, auto-provisioned with the Prometheus data source and a Loki datasource (added via `gitops/loki/grafana-loki-datasource.yaml`) |
 | Alertmanager | Alert routing and grouping |
 | Prometheus Operator | Manages `PrometheusRule` and `ServiceMonitor` CRDs |
 
@@ -1175,6 +1192,117 @@ Alerts with the same `alertname` + `namespace` are batched into a single Slack m
 | `repeatInterval` | 4h | Re-notify every 4h if still firing |
 
 </details>
+
+---
+
+## Log Aggregation - Loki, Fluent Bit, and Grafana datasource
+
+Container logs are collected, shipped to a central store, and made queryable in Grafana without any manual configuration steps.
+
+### Architecture
+
+```
+[Each node] Fluent Bit DaemonSet
+    │  tails /var/log/containers/*.log
+    │  enriches with Kubernetes labels
+    ▼
+loki-gateway.logging.svc.cluster.local  (Loki HTTP ingestion endpoint)
+    │
+    ▼
+Loki (SingleBinary, logging namespace)
+    │  stores logs on emptyDir volume
+    ▼
+Grafana datasource (ConfigMap, monitoring namespace)
+    │  auto-provisioned by grafana-sidecar
+    ▼
+Grafana → Explore → Loki queries (LogQL)
+```
+
+### What gets deployed
+
+| Component | Helm chart | Namespace | Sync wave |
+|-----------|-----------|-----------|-----------|
+| Loki | `grafana-community/loki` `6.56.1` | `logging` | 3 |
+| Fluent Bit | `fluent/fluent-bit` `0.48.9` | `logging` | 4 |
+| Grafana Loki datasource | `charts/raw` (ConfigMap) | `monitoring` | 4 |
+
+### Loki configuration
+
+Loki runs in `SingleBinary` mode with one replica. This is the simplest topology and is suitable for development and demo environments.
+
+> **Ephemeral storage:** Logs are stored on an `emptyDir` volume and are **permanently lost when the Loki pod restarts**. This is intentional for a demo - replace with an S3/GCS object store before using this in any persistent environment.
+
+| Setting | Value | Notes |
+|---------|-------|-------|
+| Deployment mode | `SingleBinary` | All Loki components in one pod |
+| Storage | `filesystem` (emptyDir) | Logs are lost on pod restart - use S3/GCS in production |
+| Replication factor | `1` | No redundancy - acceptable for demos |
+| Schema | `v13` (TSDB, `2024-01-01`) | Current recommended schema |
+| Auth | disabled (`auth_enabled: false`) | Single-tenant mode |
+| Gateway | enabled | Exposes `loki-gateway` ClusterIP service used by Fluent Bit and Grafana |
+| Backend / Read / Write replicas | `0` | Disabled - SingleBinary handles everything |
+
+### Fluent Bit configuration
+
+Fluent Bit runs as a DaemonSet (one pod per node) in the `logging` namespace.
+
+**Input:** `tail` plugin reads all container logs from `/var/log/containers/*.log` using the `docker` and `cri` multiline parsers.
+
+**Filter:** `kubernetes` plugin enriches each log record with metadata including namespace, pod name, container name, and other Kubernetes labels.
+
+**Output:** `loki` plugin forwards enriched logs to the Loki gateway. Labels are set inline using the `$kubernetes[...]` record accessor. Labels used:
+
+| Label | Value |
+|-------|-------|
+| `job` | `fluent-bit` |
+| `namespace` | `$kubernetes['namespace_name']` |
+| `pod` | `$kubernetes['pod_name']` |
+| `container` | `$kubernetes['container_name']` |
+
+### Grafana Loki datasource
+
+The datasource is provisioned automatically via a ConfigMap with label `grafana_datasource: "1"` in the `monitoring` namespace. Grafana's sidecar detects this label and loads the datasource configuration without any manual steps.
+
+| Setting | Value |
+|---------|-------|
+| Name | `Loki` |
+| Type | `loki` |
+| URL | `http://loki-gateway.logging.svc.cluster.local` |
+| Default datasource | No (Prometheus remains the default) |
+
+### Querying logs in Grafana
+
+![Loki Logs](docs/images/logs.png)
+
+```bash
+kubectl port-forward svc/prometheus-grafana -n monitoring 3000:80
+```
+
+Open [http://localhost:3000](http://localhost:3000), navigate to **Explore**, and select the **Loki** datasource. Example LogQL queries:
+
+```logql
+# All logs from the simple-time-service namespace
+{namespace="simple-time-service"}
+
+# Logs from a specific container
+{namespace="simple-time-service", container="simple-time-service"}
+
+# Filter for error-level log lines
+{namespace="simple-time-service"} |= "ERROR"
+```
+
+### Verify Loki is receiving logs
+
+```bash
+# Check pods are running
+kubectl get pods -n logging
+
+# Port-forward the Loki gateway
+kubectl port-forward svc/loki-gateway -n logging 3100:80
+
+# Query recent logs via the Loki API
+curl 'http://localhost:3100/loki/api/v1/labels'
+```
 
 ---
 
