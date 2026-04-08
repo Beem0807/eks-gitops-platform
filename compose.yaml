@@ -1,7 +1,7 @@
 services:
   simple-time-service:
     build:
-      context: ./sample-workload
+      context: ./app
       dockerfile: Dockerfile
     image: simple-time-service:local
     container_name: simple-time-service

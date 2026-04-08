@@ -1,16 +1,18 @@
-name: Build and Push sample-workload image
+name: Build and Push app image
 
 on:
   push:
     branches:
       - main
     paths:
-      - 'sample-workload/**'
-      - '.github/workflows/sample-workload-image.yaml'
+      - 'app/**'
+      - '.github/workflows/app-image.yaml'
   pull_request:
+    branches:
+      - main
     paths:
-      - 'sample-workload/**'
-      - '.github/workflows/sample-workload-image.yaml'
+      - 'app/**'
+      - '.github/workflows/app-image.yaml'
   workflow_dispatch:
 
 jobs:
@@ -49,8 +51,8 @@ jobs:
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
-          context: ./sample-workload
-          file: ./sample-workload/Dockerfile
+          context: ./app
+          file: ./app/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}

@@ -11,15 +11,16 @@ This repository contains six platform components plus a shared utility chart:
 
 **Utility:** `charts/raw` - a reusable generic Helm chart for deploying arbitrary Kubernetes resources through the same ApplicationSet pattern used by the platform components above.
 
-> **Naming note:** The application is called SimpleTimeService. Its source code lives under `sample-workload/`, the raw Kubernetes manifest is in `k8s/microservice.yaml`, and the Helm release name is `simple-time-service`. These names refer to the same service.
+> **Naming note:** The application is called SimpleTimeService. Its source code lives under `app/`, the raw Kubernetes manifest is in `k8s/microservice.yaml`, and the Helm release name is `simple-time-service`. These names refer to the same service.
 
 ---
 
 ## Quick demo
 
 ```bash
-# 1. Provision infrastructure
-cd terraform && terraform init && terraform apply
+# 1. Provision infrastructure (infrastructure + app in one step)
+cd terraform/bootstrap && terraform init && terraform apply
+# OR: cd terraform && terraform init && terraform apply  (infrastructure only)
 
 # 2. Authenticate kubectl (use the same IAM identity that ran apply)
 aws eks update-kubeconfig --region ap-south-1 --name simple-eks
@@ -77,7 +78,6 @@ These choices are intentional for a demo environment:
 - No ingress controller is included; services are accessed via `kubectl port-forward`.
 - ArgoCD is installed manually once; everything else is GitOps-managed from that point.
 - Prometheus Operator TLS and admission webhooks are disabled to simplify bootstrap reliability.
-- `sample-workload/` folder name is kept as-is from the original project setup.
 
 ---
 
@@ -103,7 +103,7 @@ The service is containerized with Docker and runs as a non-root user. It can be 
 .
 ├── .github/
 │   └── workflows/
-│       └── sample-workload-image.yaml  # CI - build and push Docker image to Docker Hub
+│       └── app-image.yaml             # CI - build and push Docker image to Docker Hub
 ├── compose.yaml                   # Docker Compose for local development
 ├── gitops/
 │   ├── bootstrap/
@@ -143,7 +143,7 @@ The service is containerized with Docker and runs as a non-root user. It can be 
 │           ├── hpa.yaml
 │           ├── networkpolicy.yaml
 │           └── NOTES.txt
-├── sample-workload/
+├── app/
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   ├── .dockerignore
@@ -168,6 +168,14 @@ The service is containerized with Docker and runs as a non-root user. It can be 
     ├── outputs.tf                 # Root-level outputs
     ├── providers.tf               # AWS provider configuration
     ├── versions.tf                # Terraform and provider version constraints
+    ├── bootstrap/                 # Bootstrap module - infrastructure + app in one apply
+    │   ├── backend.tf             # S3 remote state (key: bootstrap/terraform.tfstate)
+    │   ├── main.tf                # VPC + EKS + kubeconfig + namespace + Helm release
+    │   ├── variables.tf
+    │   ├── terraform.tfvars
+    │   ├── outputs.tf
+    │   ├── providers.tf
+    │   └── versions.tf
     └── modules/
         ├── vpc/                   # VPC module (2 public + 2 private subnets)
         │   ├── main.tf
@@ -212,6 +220,7 @@ The service is containerized with Docker and runs as a non-root user. It can be 
 | NAT Gateway | Single NAT gateway so private-subnet nodes can reach the internet |
 | EKS cluster | Kubernetes 1.33, API endpoint publicly accessible (no CIDR restriction - acceptable for demos, but restrict `public_access_cidrs` in production) |
 | Managed node group | `node_desired_size` × `m6a.large` on-demand nodes placed on private subnets only |
+| Node security group | Additional inbound rule: TCP 30000–32767 from `0.0.0.0/0` so the NLB can reach NodePorts (NLB preserves the source IP, so the security group must allow the full public range) |
 | EKS add-ons | `coredns`, `kube-proxy`, `vpc-cni` (Network Policy controller **disabled by default** — see [Network Policy](#network-policy)) managed by the EKS module |
 
 The EKS module used is [`terraform-aws-modules/eks/aws`](https://registry.terraform.io/modules/terraform-aws-modules/eks/aws/latest) and the VPC module is [`terraform-aws-modules/vpc/aws`](https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws/latest).
@@ -361,6 +370,86 @@ terraform destroy
 ```
 
 This removes all AWS resources created by Terraform. Confirm with `yes` when prompted.
+
+---
+
+## Bootstrap - one-step infrastructure and app deployment
+
+`terraform/bootstrap/` is an alternative Terraform root module that provisions the full stack — VPC, EKS cluster, Kubernetes namespace, and the SimpleTimeService Helm release — in a single `terraform apply`. Use it when you want to stand up the complete environment without separately running Terraform and then ArgoCD.
+
+### What the bootstrap module does differently from `terraform/`
+
+| Step | Root `terraform/` | `terraform/bootstrap/` |
+|------|-------------------|------------------------|
+| VPC + EKS | Yes | Yes (same shared modules) |
+| Update kubeconfig | No | Yes (`null_resource` runs `aws eks update-kubeconfig`) |
+| Create namespace | No | Yes (`kubernetes_namespace`) |
+| Deploy SimpleTimeService | No | Yes (Helm release with NLB service) |
+| Remote state key | `terraform.tfstate` | `bootstrap/terraform.tfstate` |
+
+The Helm release uses the same `charts/simple-time-service` chart and deploys it with a `LoadBalancer` service of type NLB (`service.beta.kubernetes.io/aws-load-balancer-type: nlb`), so the service is publicly reachable immediately after apply without any port-forwarding.
+
+### Deploying with the bootstrap module
+
+```bash
+cd terraform/bootstrap
+
+# Download providers and modules
+terraform init
+
+# Preview changes
+terraform plan
+
+# Provision VPC + EKS + namespace + Helm release in one step
+terraform apply
+```
+
+After a successful apply, the public NLB hostname is printed as `application_url`:
+
+```
+Outputs:
+
+application_url = "http://<nlb-hostname>"
+application_load_balancer_hostname = "<nlb-hostname>"
+cluster_name = "simple-eks"
+vpc_id = "vpc-..."
+```
+
+It typically takes **2–3 minutes** after the NLB hostname appears before DNS propagates and the endpoint becomes reachable.
+
+### Node security group - NLB NodePort access
+
+The EKS module (`terraform/modules/eks/main.tf`) adds the following rule to the node security group:
+
+```hcl
+node_security_group_additional_rules = {
+  ingress_nlb_nodeports = {
+    description = "Allow NLB to reach NodePorts (NLB preserves source IP)"
+    protocol    = "tcp"
+    from_port   = 30000
+    to_port     = 32767
+    type        = "ingress"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+```
+
+An NLB operates at Layer 4 and does **not** replace the source IP with its own — traffic arriving at nodes carries the original client IP. Because of this, the source address is unpredictable and the security group must allow the full public range (`0.0.0.0/0`) on the NodePort range. Without this rule the NLB health checks and forwarded traffic are silently dropped by the node security group, making the service unreachable even though the NLB itself shows healthy targets.
+
+> In production, restrict this range to the NLB's subnet CIDRs if your NLB is internal, or retain `0.0.0.0/0` only for internet-facing NLBs where client IPs are genuinely arbitrary.
+
+### Bootstrap remote state
+
+The bootstrap module uses the same S3 bucket as the root module but stores state under a different key (`bootstrap/terraform.tfstate`). Both modules can coexist in the same bucket without interfering with each other.
+
+### Destroying the bootstrap stack
+
+```bash
+cd terraform/bootstrap
+terraform destroy
+```
+
+This removes all resources provisioned by the bootstrap module, including the Helm release, namespace, EKS cluster, and VPC.
 
 ---
 
@@ -1375,7 +1464,7 @@ The service is available at `http://localhost:8080`.
 ### Docker only
 
 ```bash
-docker build -t simple-time-service ./sample-workload
+docker build -t simple-time-service ./app
 docker run --rm -p 8080:8080 simple-time-service
 ```
 
@@ -1445,13 +1534,13 @@ curl http://localhost:8080/
 
 ## CI - GitHub Actions
 
-The workflow at `.github/workflows/sample-workload-image.yaml` automatically builds and pushes the Docker image to Docker Hub.
+The workflow at `.github/workflows/app-image.yaml` automatically builds and pushes the Docker image to Docker Hub.
 
 ### Triggers
 
 | Event | Condition | Behaviour |
 |-------|-----------|-----------|
-| Push to `main` | Files under `sample-workload/**` or the workflow file changed | Build + push |
+| Push to `main` | Files under `app/**` or the workflow file changed | Build + push |
 | Pull request | Same path filter | Build only (no push) |
 | `workflow_dispatch` | Manual trigger from the Actions UI | Build + push |
 
@@ -1504,7 +1593,7 @@ The image is built as a **multi-platform manifest** targeting both `linux/amd64`
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
   -t <your-dockerhub-username>/simple-time-service:latest \
-  --push ./sample-workload
+  --push ./app
 ```
 
 `--push` builds and pushes both platform variants to the registry in a single step - no separate `docker push` needed.
