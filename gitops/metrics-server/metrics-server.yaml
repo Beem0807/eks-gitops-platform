@@ -3,6 +3,10 @@ kind: ApplicationSet
 metadata:
   name: metrics-server
   namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: autoscaling
 spec:
   goTemplate: true
   goTemplateOptions: ["missingkey=error"]
@@ -11,6 +15,10 @@ spec:
   template:
     metadata:
       name: 'metrics-server-{{.nameNormalized}}'
+      labels:
+        app.kubernetes.io/part-of: eks-gitops-platform
+        app.kubernetes.io/managed-by: argocd
+        app.kubernetes.io/component: autoscaling
     spec:
       project: default
       source:

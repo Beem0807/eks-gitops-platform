@@ -3,6 +3,10 @@ kind: ApplicationSet
 metadata:
   name: simple-time-service-alerts
   namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: alerting
 spec:
   goTemplate: true
   goTemplateOptions: ["missingkey=error"]
@@ -13,6 +17,10 @@ spec:
       name: 'simple-time-service-alerts-{{.nameNormalized}}'
       annotations:
         argocd.argoproj.io/sync-wave: "3"
+      labels:
+        app.kubernetes.io/part-of: eks-gitops-platform
+        app.kubernetes.io/managed-by: argocd
+        app.kubernetes.io/component: alerting
     spec:
       project: default
       source:

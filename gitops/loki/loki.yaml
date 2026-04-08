@@ -3,6 +3,10 @@ kind: ApplicationSet
 metadata:
   name: loki
   namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: logging
 spec:
   goTemplate: true
   goTemplateOptions: ["missingkey=error"]
@@ -13,6 +17,10 @@ spec:
       name: 'loki-{{.nameNormalized}}'
       annotations:
         argocd.argoproj.io/sync-wave: "3"
+      labels:
+        app.kubernetes.io/part-of: eks-gitops-platform
+        app.kubernetes.io/managed-by: argocd
+        app.kubernetes.io/component: logging
     spec:
       project: default
       source:

@@ -3,6 +3,10 @@ kind: ApplicationSet
 metadata:
   name: fluent-bit
   namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: logging
 spec:
   goTemplate: true
   goTemplateOptions: ["missingkey=error"]
@@ -13,6 +17,10 @@ spec:
       name: 'fluent-bit-{{.nameNormalized}}'
       annotations:
         argocd.argoproj.io/sync-wave: "4"
+      labels:
+        app.kubernetes.io/part-of: eks-gitops-platform
+        app.kubernetes.io/managed-by: argocd
+        app.kubernetes.io/component: logging
     spec:
       project: default
       source:

@@ -3,6 +3,10 @@ kind: ApplicationSet
 metadata:
   name: grafana-dashboards
   namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: monitoring
 spec:
   goTemplate: true
   goTemplateOptions: ["missingkey=error"]
@@ -11,6 +15,10 @@ spec:
   template:
     metadata:
       name: 'grafana-dashboards-{{.nameNormalized}}'
+      labels:
+        app.kubernetes.io/part-of: eks-gitops-platform
+        app.kubernetes.io/managed-by: argocd
+        app.kubernetes.io/component: monitoring
     spec:
       project: default
       source:

@@ -3,6 +3,10 @@ kind: ApplicationSet
 metadata:
   name: simple-time-service
   namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: workload
 spec:
   goTemplate: true
   goTemplateOptions: ["missingkey=error"]
@@ -11,6 +15,10 @@ spec:
   template:
     metadata:
       name: simple-time-service-{{.nameNormalized}}
+      labels:
+        app.kubernetes.io/part-of: eks-gitops-platform
+        app.kubernetes.io/managed-by: argocd
+        app.kubernetes.io/component: workload
     spec:
       project: default
       source:
