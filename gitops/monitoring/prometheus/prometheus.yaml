@@ -40,7 +40,7 @@ spec:
                   type: None
 
             # kube-scheduler and kube-controller-manager are managed by AWS on EKS
-            # and are not exposed for Prometheus scraping — disable these rules to avoid noise
+            # and are not exposed for Prometheus scraping - disable these rules to avoid noise
             kubeScheduler:
               enabled: false
             kubeControllerManager:
