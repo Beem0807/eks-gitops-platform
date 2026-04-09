@@ -4,8 +4,8 @@ The `gitops/alerts/` directory deploys two ArgoCD apps that together form the al
 
 | File | What it deploys |
 |------|----------------|
-| `simple-time-service-alerts.yaml` | `PrometheusRule` CRD — alert expressions evaluated by Prometheus |
-| `alertmanager-slack.yaml` | `AlertmanagerConfig` CRD — routes matching alerts to a Slack channel |
+| `simple-time-service-alerts.yaml` | `PrometheusRule` CRD - alert expressions evaluated by Prometheus |
+| `alertmanager-slack.yaml` | `AlertmanagerConfig` CRD - routes matching alerts to a Slack channel |
 
 ---
 
@@ -16,18 +16,18 @@ The `gitops/alerts/` directory deploys two ArgoCD apps that together form the al
 | `SimpleTimeServiceDown` | Scrape target unreachable for 1 minute | critical |
 | `SimpleTimeServiceHPAAtMaxReplicas` | HPA at max replicas (10) for 5 minutes | warning |
 
-Both rules carry the label `notify: slack`. The Slack route matches on this label — any future alert added to the same `PrometheusRule` automatically routes to Slack without touching the route config.
+Both rules carry the label `notify: slack`. The Slack route matches on this label - any future alert added to the same `PrometheusRule` automatically routes to Slack without touching the route config.
 
 ---
 
 ## Enabling Slack notifications
 
-The stack deploys without the Slack secret. Only the `alertmanager-slack` app shows as degraded in ArgoCD — Alertmanager itself runs fine on its default config.
+The stack deploys without the Slack secret. Only the `alertmanager-slack` app shows as degraded in ArgoCD - Alertmanager itself runs fine on its default config.
 
 ```bash
 # 1. Fill in your webhook URL
 cp secrets/alertmanager-config.example.yaml secrets/slack-webhook-url.yaml
-# Edit secrets/slack-webhook-url.yaml — paste your Slack incoming webhook URL
+# Edit secrets/slack-webhook-url.yaml - paste your Slack incoming webhook URL
 
 # 2. Apply the secret
 kubectl apply -f secrets/slack-webhook-url.yaml -n monitoring
@@ -59,7 +59,7 @@ curl -X POST http://localhost:9093/api/v2/alerts \
 
 The alert appears in `#alerts-test` within 30 seconds and auto-resolves after 5 minutes.
 
-> The `notify: slack` label is required — the route only matches alerts carrying it.
+> The `notify: slack` label is required - the route only matches alerts carrying it.
 
 ![Slack Alert](../../docs/images/Alert.png)
 
@@ -99,12 +99,12 @@ curl -X POST http://localhost:9093/api/v2/silences \
     \"matchers\": [{\"name\":\"alertname\",\"value\":\"SimpleTimeServiceDown\",\"isRegex\":false}],
     \"startsAt\":  \"$NOW\",
     \"endsAt\":    \"$UNTIL\",
-    \"comment\":   \"Known issue — investigating\",
+    \"comment\":   \"Known issue - investigating\",
     \"createdBy\": \"nabeem\"
   }"
 ```
 
-Silences are stored in Alertmanager only — not persisted to git, lost on pod restart.
+Silences are stored in Alertmanager only - not persisted to git, lost on pod restart.
 
 ---
 
@@ -122,4 +122,4 @@ Alerts with the same `alertname` + `namespace` are batched into a single Slack m
 
 ## How the routing works
 
-The `AlertmanagerConfig` uses `alertmanagerConfigMatcherStrategy: None` so the route is not scoped to a single namespace — it matches alerts from anywhere in the cluster that carry `notify=slack`. Built-in EKS noise alerts (`KubeSchedulerDown`, `KubeControllerManagerDown`) are suppressed in `prometheus.yaml` since the EKS control plane is never exposed for scraping.
+The `AlertmanagerConfig` uses `alertmanagerConfigMatcherStrategy: None` so the route is not scoped to a single namespace - it matches alerts from anywhere in the cluster that carry `notify=slack`. Built-in EKS noise alerts (`KubeSchedulerDown`, `KubeControllerManagerDown`) are suppressed in `prometheus.yaml` since the EKS control plane is never exposed for scraping.

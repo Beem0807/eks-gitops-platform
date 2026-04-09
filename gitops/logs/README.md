@@ -4,9 +4,9 @@ The `gitops/logs/` directory deploys the full log pipeline via ArgoCD.
 
 | File | What it deploys |
 |------|----------------|
-| `loki/loki.yaml` | Loki in SingleBinary mode — central log store |
+| `loki/loki.yaml` | Loki in SingleBinary mode - central log store |
 | `loki/grafana-loki-datasource.yaml` | Grafana Loki datasource ConfigMap, auto-provisioned via `charts/raw` |
-| `fluent-bit/fluent-bit.yaml` | Fluent Bit DaemonSet — collects and forwards container logs to Loki |
+| `fluent-bit/fluent-bit.yaml` | Fluent Bit DaemonSet - collects and forwards container logs to Loki |
 
 ---
 
@@ -39,12 +39,12 @@ Sync-wave ordering ensures Loki is running before Fluent Bit and the datasource 
 
 ## Loki
 
-Runs in `SingleBinary` mode — all components in one pod. Suitable for demos and development.
+Runs in `SingleBinary` mode - all components in one pod. Suitable for demos and development.
 
 | Setting | Value | Notes |
 |---------|-------|-------|
 | Mode | `SingleBinary` | One pod, all components |
-| Storage | `filesystem` on `emptyDir` | **Logs are lost on pod restart** — use S3/GCS in production |
+| Storage | `filesystem` on `emptyDir` | **Logs are lost on pod restart** - use S3/GCS in production |
 | Replication | `1` | No redundancy |
 | Schema | `v13` (TSDB, from `2024-01-01`) | Current recommended schema |
 | Auth | disabled (`auth_enabled: false`) | Single-tenant mode |
@@ -54,7 +54,7 @@ Runs in `SingleBinary` mode — all components in one pod. Suitable for demos an
 
 ## Fluent Bit
 
-Runs as a DaemonSet in the `logging` namespace — one pod per node.
+Runs as a DaemonSet in the `logging` namespace - one pod per node.
 
 **Input:** `tail` plugin reads all container logs from `/var/log/containers/*.log` using the `docker` and `cri` multiline parsers.
 
@@ -73,7 +73,7 @@ Runs as a DaemonSet in the `logging` namespace — one pod per node.
 
 ## Grafana Loki datasource
 
-A ConfigMap with label `grafana_datasource: "1"` deployed into the `monitoring` namespace. Grafana's sidecar detects it and provisions the datasource automatically — no manual configuration needed.
+A ConfigMap with label `grafana_datasource: "1"` deployed into the `monitoring` namespace. Grafana's sidecar detects it and provisions the datasource automatically - no manual configuration needed.
 
 | Setting | Value |
 |---------|-------|

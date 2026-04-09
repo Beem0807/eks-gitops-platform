@@ -1,6 +1,6 @@
 # charts/raw
 
-A minimal, reusable Helm chart that renders any list of Kubernetes resources passed in via `values.yaml`. It exists so that every resource in the platform — including plain ConfigMaps — can be deployed through the same ArgoCD ApplicationSet pattern without needing a separate raw manifest tracked outside of `gitops/`.
+A minimal, reusable Helm chart that renders any list of Kubernetes resources passed in via `values.yaml`. It exists so that every resource in the platform - including plain ConfigMaps - can be deployed through the same ArgoCD ApplicationSet pattern without needing a separate raw manifest tracked outside of `gitops/`.
 
 ---
 

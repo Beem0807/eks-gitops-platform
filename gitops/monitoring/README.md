@@ -4,7 +4,7 @@ The `gitops/monitoring/` directory deploys the full observability stack via Argo
 
 | File | What it deploys |
 |------|----------------|
-| `prometheus/prometheus.yaml` | `kube-prometheus-stack` — Prometheus, Grafana, Alertmanager, Prometheus Operator |
+| `prometheus/prometheus.yaml` | `kube-prometheus-stack` - Prometheus, Grafana, Alertmanager, Prometheus Operator |
 | `grafana/simple-time-service-dashboard.yaml` | Pre-built Grafana dashboard for SimpleTimeService via `charts/raw` |
 
 ---
@@ -25,11 +25,11 @@ All components land in the `monitoring` namespace, created automatically by Argo
 
 ## Key configuration
 
-`serviceMonitorSelectorNilUsesHelmValues: false` — tells Prometheus to discover `ServiceMonitor` resources across **all namespaces**. Without this, the `ServiceMonitor` in the `simple-time-service` namespace is silently ignored.
+`serviceMonitorSelectorNilUsesHelmValues: false` - tells Prometheus to discover `ServiceMonitor` resources across **all namespaces**. Without this, the `ServiceMonitor` in the `simple-time-service` namespace is silently ignored.
 
 Prometheus Operator TLS and admission webhooks are disabled to simplify bootstrap. Enable them in production.
 
-`KubeSchedulerDown` and `KubeControllerManagerDown` alerts are suppressed — on EKS the control plane is managed by AWS and never exposed for scraping, so these would fire permanently.
+`KubeSchedulerDown` and `KubeControllerManagerDown` alerts are suppressed - on EKS the control plane is managed by AWS and never exposed for scraping, so these would fire permanently.
 
 ---
 
@@ -60,7 +60,7 @@ Open [http://localhost:9090](http://localhost:9090).
 
 ![Grafana Dashboard](../../docs/images/Grafana%20Dashboard.png)
 
-Deployed via `grafana/simple-time-service-dashboard.yaml` — a ConfigMap with label `grafana_dashboard: "1"` in the `monitoring` namespace. Grafana's sidecar detects the label and imports it automatically. No manual steps required.
+Deployed via `grafana/simple-time-service-dashboard.yaml` - a ConfigMap with label `grafana_dashboard: "1"` in the `monitoring` namespace. Grafana's sidecar detects the label and imports it automatically. No manual steps required.
 
 The dashboard (UID `simple-time-service`, auto-refreshes every 30s) has 12 panels across 5 rows:
 
@@ -72,7 +72,7 @@ The dashboard (UID `simple-time-service`, auto-refreshes every 30s) has 12 panel
 | CPU | CPU request vs usage, CPU limit vs usage |
 | Memory | Memory request vs usage (MiB), memory limit vs usage (MiB) |
 
-> HTTP traffic panels (rows 2–3) show **No data** until the ServiceMonitor is enabled and the service has received traffic on `/` (not `/health` or `/metrics` — these are filtered out by all traffic queries). Infrastructure panels (rows 1, 4–5) populate from `kube-state-metrics` and cAdvisor regardless.
+> HTTP traffic panels (rows 2–3) show **No data** until the ServiceMonitor is enabled and the service has received traffic on `/` (not `/health` or `/metrics` - these are filtered out by all traffic queries). Infrastructure panels (rows 1, 4–5) populate from `kube-state-metrics` and cAdvisor regardless.
 
 ---
 
@@ -86,7 +86,7 @@ kubectl get servicemonitor -n simple-time-service
 
 # 2. Check Prometheus picked it up as a scrape target
 kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 9090:9090
-# Open http://localhost:9090/targets — look for simple-time-service, State: UP
+# Open http://localhost:9090/targets - look for simple-time-service, State: UP
 
 # 3. Confirm metrics are flowing
 # In Prometheus UI run: http_requests_total

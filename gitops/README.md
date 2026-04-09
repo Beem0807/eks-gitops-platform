@@ -11,25 +11,25 @@ Implements the **App of Apps** pattern with ArgoCD. A single root Application bo
 ```
 gitops/
 ├── bootstrap/
-│   └── root-app.yaml                       # Root Application — bootstraps everything below
+│   └── root-app.yaml                       # Root Application - bootstraps everything below
 ├── app/
-│   └── simple-time-service.yaml            # ApplicationSet — Helm deploy to every registered cluster
+│   └── simple-time-service.yaml            # ApplicationSet - Helm deploy to every registered cluster
 ├── metrics-server/
-│   └── metrics-server.yaml                 # ApplicationSet — metrics-server (HPA prerequisite)
+│   └── metrics-server.yaml                 # ApplicationSet - metrics-server (HPA prerequisite)
 ├── monitoring/
 │   ├── prometheus/
-│   │   └── prometheus.yaml                 # ApplicationSet — kube-prometheus-stack
+│   │   └── prometheus.yaml                 # ApplicationSet - kube-prometheus-stack
 │   └── grafana/
-│       └── simple-time-service-dashboard.yaml  # ApplicationSet — Grafana dashboard ConfigMap
+│       └── simple-time-service-dashboard.yaml  # ApplicationSet - Grafana dashboard ConfigMap
 ├── alerts/
-│   ├── simple-time-service-alerts.yaml     # ApplicationSet — PrometheusRule (alert expressions)
-│   └── alertmanager-slack.yaml             # ApplicationSet — AlertmanagerConfig (Slack routing)
+│   ├── simple-time-service-alerts.yaml     # ApplicationSet - PrometheusRule (alert expressions)
+│   └── alertmanager-slack.yaml             # ApplicationSet - AlertmanagerConfig (Slack routing)
 └── logs/
     ├── loki/
-    │   ├── loki.yaml                        # ApplicationSet — Loki single-binary log store
-    │   └── grafana-loki-datasource.yaml     # ApplicationSet — Loki datasource ConfigMap for Grafana
+    │   ├── loki.yaml                        # ApplicationSet - Loki single-binary log store
+    │   └── grafana-loki-datasource.yaml     # ApplicationSet - Loki datasource ConfigMap for Grafana
     └── fluent-bit/
-        └── fluent-bit.yaml                  # ApplicationSet — Fluent Bit DaemonSet (collector → Loki)
+        └── fluent-bit.yaml                  # ApplicationSet - Fluent Bit DaemonSet (collector → Loki)
 ```
 
 ---
@@ -76,7 +76,7 @@ kubectl -n argocd get secret argocd-initial-admin-secret \
 
 ## Bootstrap
 
-Apply the root app once — this is the only manual step:
+Apply the root app once - this is the only manual step:
 
 ```bash
 kubectl apply -f gitops/bootstrap/root-app.yaml
@@ -141,7 +141,7 @@ Any push to `main` affecting `gitops/` or `charts/` is automatically applied wit
 
 ## Autoscaling - HPA and metrics-server
 
-`metrics-server` is a hard prerequisite for HPA — without it the HPA controller cannot read pod utilization and no scaling decisions are made. Two flags are set for EKS compatibility:
+`metrics-server` is a hard prerequisite for HPA - without it the HPA controller cannot read pod utilization and no scaling decisions are made. Two flags are set for EKS compatibility:
 
 | Flag | Reason |
 |------|--------|
@@ -168,7 +168,7 @@ kubectl top pods -n simple-time-service
 
 Disabled by default. Enabling it requires two steps.
 
-**Step 1 — enable the VPC CNI Network Policy controller** in [terraform/modules/eks/main.tf](../terraform/modules/eks/main.tf):
+**Step 1 - enable the VPC CNI Network Policy controller** in [terraform/modules/eks/main.tf](../terraform/modules/eks/main.tf):
 
 ```hcl
 vpc-cni = {
@@ -182,7 +182,7 @@ vpc-cni = {
 
 Then apply: `cd terraform && terraform apply`
 
-**Step 2 — enable the NetworkPolicy resource** in `gitops/app/simple-time-service.yaml`:
+**Step 2 - enable the NetworkPolicy resource** in `gitops/app/simple-time-service.yaml`:
 
 ```yaml
 helm:
