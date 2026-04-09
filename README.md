@@ -21,10 +21,15 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 |-|-|
 | [app/README.md](app/README.md) | Docker image, CI pipeline, endpoints, container security |
 | [terraform/README.md](terraform/README.md) | Infrastructure provisioning, bootstrap module, remote state |
-| [charts/simple-time-service/README.md](charts/simple-time-service/README.md) | Helm chart values, install/upgrade, `charts/raw` usage |
+| [charts/simple-time-service/README.md](charts/simple-time-service/README.md) | Helm chart values, install/upgrade, examples |
+| [charts/raw/README.md](charts/raw/README.md) | Generic chart for deploying arbitrary K8s resources via ApplicationSets |
 | [k8s/README.md](k8s/README.md) | Raw Kubernetes manifest (quick-start, no Helm) |
-| [gitops/README.md](gitops/README.md) | ArgoCD setup, monitoring, alerting, logging, autoscaling, network policy |
 | [scripts/README.md](scripts/README.md) | Load testing with Python and k6 |
+| **GitOps** | |
+| [gitops/README.md](gitops/README.md) | ArgoCD install, bootstrap, sync policy, autoscaling, network policy |
+| [gitops/monitoring/README.md](gitops/monitoring/README.md) | Prometheus, Grafana dashboard, ServiceMonitor verification |
+| [gitops/alerts/README.md](gitops/alerts/README.md) | PrometheusRules, Slack alerting, silencing, grouping |
+| [gitops/logs/README.md](gitops/logs/README.md) | Loki, Fluent Bit, log querying in Grafana |
 
 ---
 
@@ -100,7 +105,7 @@ kubectl port-forward svc/prometheus-grafana -n monitoring 3000:80
 | 4 | Prometheus scraping | Port-forward Prometheus → `http://localhost:9090/targets` — `simple-time-service` shows `UP` |
 | 5 | Grafana dashboard live | `http://localhost:3000` — SimpleTimeService dashboard has data |
 | 6 | HPA reacts to load | `kubectl get hpa -n simple-time-service -w` while running `python3 scripts/load_test.py` |
-| 7 | Slack alert fires | Fire test alert (see [gitops/README.md](gitops/README.md#testing-the-slack-receiver)) — appears in `#alerts-test` within 30s |
+| 7 | Slack alert fires | Fire test alert (see [gitops/alerts/README.md](gitops/alerts/README.md#testing-the-slack-receiver)) — appears in `#alerts-test` within 30s |
 | 8 | Loki API reachable | `kubectl port-forward svc/loki-gateway -n logging 3100:80` → `curl 'http://localhost:3100/loki/api/v1/labels'` |
 | 9 | Logs in Grafana | Explore → Loki datasource → `{namespace="simple-time-service"}` |
 
@@ -144,20 +149,22 @@ kubectl port-forward svc/prometheus-grafana -n monitoring 3000:80
 │   │   └── root-app.yaml                       # ArgoCD root Application — bootstraps everything below
 │   ├── app/
 │   │   └── simple-time-service.yaml            # ApplicationSet — Helm deploy to every registered cluster
-│   ├── prometheus/
-│   │   └── prometheus.yaml                     # ApplicationSet — kube-prometheus-stack
 │   ├── metrics-server/
 │   │   └── metrics-server.yaml                 # ApplicationSet — metrics-server (HPA prerequisite)
-│   ├── grafana/
-│   │   └── simple-time-service-dashboard.yaml  # ApplicationSet — Grafana dashboard ConfigMap
+│   ├── monitoring/
+│   │   ├── prometheus/
+│   │   │   └── prometheus.yaml                 # ApplicationSet — kube-prometheus-stack
+│   │   └── grafana/
+│   │       └── simple-time-service-dashboard.yaml  # ApplicationSet — Grafana dashboard ConfigMap
 │   ├── alerts/
 │   │   ├── simple-time-service-alerts.yaml     # ApplicationSet — PrometheusRule (alert expressions)
 │   │   └── alertmanager-slack.yaml             # ApplicationSet — AlertmanagerConfig (Slack routing)
-│   ├── loki/
-│   │   ├── loki.yaml                           # ApplicationSet — Loki single-binary log store
-│   │   └── grafana-loki-datasource.yaml        # ApplicationSet — Loki datasource ConfigMap for Grafana
-│   └── fluent-bit/
-│       └── fluent-bit.yaml                     # ApplicationSet — Fluent Bit DaemonSet (collector → Loki)
+│   └── logs/
+│       ├── loki/
+│       │   ├── loki.yaml                       # ApplicationSet — Loki single-binary log store
+│       │   └── grafana-loki-datasource.yaml    # ApplicationSet — Loki datasource ConfigMap for Grafana
+│       └── fluent-bit/
+│           └── fluent-bit.yaml                 # ApplicationSet — Fluent Bit DaemonSet (collector → Loki)
 ├── scripts/
 │   ├── load_test.py                            # Python load generator (no dependencies)
 │   └── k6-staged.js                            # k6 staged ramping-arrival-rate scenario
@@ -204,6 +211,7 @@ These are intentional trade-offs for a demo environment:
 - **ArgoCD installed manually once** — everything it manages is then fully GitOps-driven.
 - **Prometheus Operator TLS and webhooks disabled** — simplifies initial bootstrap reliability.
 - **Loki on emptyDir** — logs are ephemeral by design; replace with S3/GCS for any persistent environment.
+- **Network Policy disabled by default** — the chart includes a `NetworkPolicy` resource but it is off by default. Enabling it requires two steps: turning on the VPC CNI Network Policy controller in Terraform, then setting `networkPolicy.enabled: true` in the ArgoCD ApplicationSet. See [gitops/README.md](gitops/README.md#network-policy).
 
 ---
 
