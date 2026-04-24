@@ -54,7 +54,8 @@ module "cluster_autoscaler_irsa" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
   version = "~> 6.0"
 
-  name = "${var.cluster_name}-cluster-autoscaler-irsa"
+  name            = "${var.cluster_name}-cluster-autoscaler-irsa"
+  use_name_prefix = false
 
   oidc_providers = {
     main = {

@@ -90,6 +90,11 @@ spec:
 
             gateway:
               enabled: true
+              tolerations:
+                - key: "app"
+                  operator: "Equal"
+                  value: "core"
+                  effect: "NoSchedule"
 
             lokiCanary:
               enabled: false
