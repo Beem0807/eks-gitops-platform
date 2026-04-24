@@ -31,6 +31,8 @@ spec:
               operator: Equal
               value: core
               effect: NoSchedule
+          podLabels:
+            app.kubernetes.io/instance: argocd
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
