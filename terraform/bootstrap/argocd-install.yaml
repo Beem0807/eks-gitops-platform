@@ -25261,9 +25261,15 @@ spec:
         imagePullPolicy: Always
         name: dex
         ports:
-        - containerPort: 5556
-        - containerPort: 5557
-        - containerPort: 5558
+          - name: http
+            containerPort: 5556
+            protocol: TCP
+          - name: grpc
+            containerPort: 5557
+            protocol: TCP
+          - name: metrics
+            containerPort: 5558
+            protocol: TCP
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
@@ -25802,8 +25808,12 @@ spec:
           timeoutSeconds: 5
         name: argocd-repo-server
         ports:
-        - containerPort: 8081
-        - containerPort: 8084
+          - name: repo-server
+            containerPort: 8081
+            protocol: TCP
+          - name: metrics
+            containerPort: 8084
+            protocol: TCP
         readinessProbe:
           httpGet:
             path: /healthz

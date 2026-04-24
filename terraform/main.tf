@@ -23,3 +23,5 @@ module "eks" {
   tags                         = var.tags
   add_cluster_autoscaler_tags  = true
 }
+
+data "aws_caller_identity" "current" {}
