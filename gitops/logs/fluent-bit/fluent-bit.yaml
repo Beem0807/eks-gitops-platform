@@ -35,6 +35,10 @@ spec:
           values: |
             kind: DaemonSet
 
+            tolerations:
+              - operator: "Exists"
+                effect: "NoSchedule"
+
             serviceMonitor:
               enabled: true
 

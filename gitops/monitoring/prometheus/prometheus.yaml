@@ -33,6 +33,11 @@ spec:
           values: |
             grafana:
               enabled: true
+              tolerations:
+                - key: "app"
+                  operator: "Equal"
+                  value: "core"
+                  effect: "NoSchedule"
 
             alertmanager:
               enabled: true
@@ -41,6 +46,46 @@ spec:
                 alertmanagerConfigNamespaceSelector: {}
                 alertmanagerConfigMatcherStrategy:
                   type: None
+                tolerations:
+                  - key: "app"
+                    operator: "Equal"
+                    value: "core"
+                    effect: "NoSchedule"
+
+            prometheus:
+              prometheusSpec:
+                retention: 7d
+                serviceMonitorSelectorNilUsesHelmValues: false
+                tolerations:
+                  - key: "app"
+                    operator: "Equal"
+                    value: "core"
+                    effect: "NoSchedule"
+
+            prometheusOperator:
+              tolerations:
+                - key: "app"
+                  operator: "Equal"
+                  value: "core"
+                  effect: "NoSchedule"
+              tls:
+                enabled: false
+              admissionWebhooks:
+                enabled: false
+                patch:
+                  enabled: false
+
+            kube-state-metrics:
+              tolerations:
+                - key: "app"
+                  operator: "Equal"
+                  value: "core"
+                  effect: "NoSchedule"
+
+            prometheus-node-exporter:
+              tolerations:
+                - operator: "Exists"
+                  effect: "NoSchedule"
 
             # kube-scheduler and kube-controller-manager are managed by AWS on EKS
             # and are not exposed for Prometheus scraping - disable these rules to avoid noise
@@ -53,19 +98,6 @@ spec:
               rules:
                 kubeSchedulerAlerting: false
                 kubeControllerManager: false
-
-            prometheus:
-              prometheusSpec:
-                retention: 7d
-                serviceMonitorSelectorNilUsesHelmValues: false
-
-            prometheusOperator:
-              tls:
-                enabled: false
-              admissionWebhooks:
-                enabled: false
-                patch:
-                  enabled: false
       destination:
         server: '{{.server}}'
         namespace: monitoring

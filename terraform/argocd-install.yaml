@@ -25437,11 +25437,6 @@ metadata:
     app.kubernetes.io/part-of: argocd
   name: argocd-redis
 spec:
-  tolerations:
-    - key: "app"
-      operator: "Equal"
-      value: "core"
-      effect: "NoSchedule"
   selector:
     matchLabels:
       app.kubernetes.io/name: argocd-redis
@@ -25450,6 +25445,11 @@ spec:
       labels:
         app.kubernetes.io/name: argocd-redis
     spec:
+      tolerations:
+        - key: "app"
+          operator: "Equal"
+          value: "core"
+          effect: "NoSchedule"
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -25527,16 +25527,16 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: argocd-repo-server
-  tolerations:
-    - key: "app"
-      operator: "Equal"
-      value: "core"
-      effect: "NoSchedule"
   template:
     metadata:
       labels:
         app.kubernetes.io/name: argocd-repo-server
     spec:
+      tolerations:
+        - key: "app"
+          operator: "Equal"
+          value: "core"
+          effect: "NoSchedule"
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -25900,11 +25900,6 @@ metadata:
     app.kubernetes.io/part-of: argocd
   name: argocd-server
 spec:
-  tolerations:
-    - key: "app"
-      operator: "Equal"
-      value: "core"
-      effect: "NoSchedule"
   selector:
     matchLabels:
       app.kubernetes.io/name: argocd-server
@@ -25913,6 +25908,11 @@ spec:
       labels:
         app.kubernetes.io/name: argocd-server
     spec:
+      tolerations:
+        - key: "app"
+          operator: "Equal"
+          value: "core"
+          effect: "NoSchedule"
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -26313,11 +26313,6 @@ metadata:
     app.kubernetes.io/part-of: argocd
   name: argocd-application-controller
 spec:
-  tolerations:
-    - key: "app"
-      operator: "Equal"
-      value: "core"
-      effect: "NoSchedule"
   replicas: 1
   selector:
     matchLabels:
@@ -26328,6 +26323,11 @@ spec:
       labels:
         app.kubernetes.io/name: argocd-application-controller
     spec:
+      tolerations:
+        - key: "app"
+          operator: "Equal"
+          value: "core"
+          effect: "NoSchedule"
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:

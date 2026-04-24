@@ -55,6 +55,11 @@ spec:
                 readOnlyRootFilesystem: false
 
             singleBinary:
+              tolerations:
+                - key: "app"
+                  operator: "Equal"
+                  value: "core"
+                  effect: "NoSchedule"
               replicas: 1
               persistence:
                 enabled: false

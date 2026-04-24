@@ -44,8 +44,9 @@ data "kubectl_file_documents" "argocd_install" {
 }
 
 resource "kubectl_manifest" "argocd_install" {
-  for_each  = data.kubectl_file_documents.argocd_install.manifests
-  yaml_body = each.value
+  for_each           = data.kubectl_file_documents.argocd_install.manifests
+  yaml_body          = each.value
+  override_namespace = "argocd"
 
   depends_on = [kubernetes_namespace.argocd]
 }
