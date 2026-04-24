@@ -47,3 +47,15 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "enable_nlb_nodeport_rule" {
+  description = "Whether to allow external access to NodePort range on worker nodes"
+  type        = bool
+  default     = false
+}
+
+variable "add_cluster_autoscaler_tags" {
+  description = "Whether to add Cluster Autoscaler discovery tags to the node group"
+  type        = bool
+  default     = false
+}

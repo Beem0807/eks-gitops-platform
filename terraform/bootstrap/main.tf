@@ -11,26 +11,15 @@ module "vpc" {
 module "eks" {
   source = "../modules/eks"
 
-  cluster_name      = var.cluster_name
-  aws_region        = var.aws_region
-  vpc_id            = module.vpc.vpc_id
-  private_subnets   = module.vpc.private_subnets
-  instance_type     = var.instance_type
-  node_desired_size = var.node_desired_size
-  node_min_size     = var.node_min_size
-  node_max_size     = var.node_max_size
-}
-
-resource "null_resource" "update_kubeconfig" {
-  triggers = {
-    cluster_name = module.eks.cluster_name
-  }
-
-  provisioner "local-exec" {
-    command = "aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks.cluster_name}"
-  }
-
-  depends_on = [module.eks]
+  cluster_name              = var.cluster_name
+  aws_region                = var.aws_region
+  vpc_id                    = module.vpc.vpc_id
+  private_subnets           = module.vpc.private_subnets
+  instance_type             = var.instance_type
+  node_desired_size         = var.node_desired_size
+  node_min_size             = var.node_min_size
+  node_max_size             = var.node_max_size
+  enable_nlb_nodeport_rule  = var.enable_nlb_nodeport_rule
 }
 
 # EKS marks the cluster Active before its API server DNS record has fully
@@ -104,6 +93,19 @@ resource "helm_release" "simple_time_service" {
       serviceMonitor = {
         enabled = false
       }
+
+      nodeSelector = {
+        app = "core"
+      }
+
+      tolerations = [
+        {
+          key      = "app"
+          operator = "Equal"
+          value    = "core"
+          effect   = "NoSchedule"
+        }
+      ]
     })
   ]
 }

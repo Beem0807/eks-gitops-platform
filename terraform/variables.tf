@@ -64,3 +64,15 @@ variable "node_max_size" {
   description = "Maximum number of EKS worker nodes"
   default     = 2
 }
+
+variable "enable_nlb_nodeport_rule" {
+  description = "Enable node security group rule for NodePort access from NLB"
+  type        = bool
+  default     = false
+}
+
+variable "environment" {
+  description = "Environment name used in Argo CD cluster metadata"
+  type        = string
+  default     = "prod"
+}

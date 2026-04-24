@@ -21,3 +21,5 @@ instance_type = "m6a.large"
 node_desired_size = 2
 node_min_size     = 2
 node_max_size     = 2
+
+environment    = "prod"
