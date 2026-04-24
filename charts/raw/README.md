@@ -26,7 +26,7 @@ Reference `charts/raw` as the Helm source in any ArgoCD ApplicationSet:
 ```yaml
 source:
   repoURL: https://github.com/Beem0807/eks-gitops-platform.git
-  targetRevision: main
+  targetRevision: feature/ca-and-karpenter
   path: charts/raw
   helm:
     releaseName: my-release
