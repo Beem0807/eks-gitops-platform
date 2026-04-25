@@ -6,7 +6,7 @@ resource "time_static" "argocd_admin_password_mtime" {
 
 resource "aws_secretsmanager_secret" "argocd_admin" {
   name        = "argocd-admin"
-  description = "Argo CD admin password hash managed through External Secrets Operator"
+  description = "Argo CD admin password"
 
   tags = merge(var.tags, {
     ExternalSecret = "true"
@@ -16,10 +16,17 @@ resource "aws_secretsmanager_secret" "argocd_admin" {
 resource "aws_secretsmanager_secret_version" "argocd_admin" {
   secret_id = aws_secretsmanager_secret.argocd_admin.id
 
-  secret_string = jsonencode({
-    adminPasswordHash  = var.argocd_admin_password_hash
-    adminPasswordMtime = time_static.argocd_admin_password_mtime.rfc3339
-  })
+  secret_string = jsonencode(
+    merge(
+      {
+        adminPasswordHash  = var.argocd_admin_password_hash
+        adminPasswordMtime = time_static.argocd_admin_password_mtime.rfc3339
+      },
+      var.argocd_admin_password_plaintext != null ? {
+        adminPassword = var.argocd_admin_password_plaintext
+      } : {}
+    )
+  )
 }
 
 resource "aws_secretsmanager_secret" "grafana_admin" {

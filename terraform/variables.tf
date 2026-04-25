@@ -82,6 +82,13 @@ variable "domain_name" {
   type        = string
 }
 
+variable "argocd_admin_password_plaintext" {
+  description = "Plain Argo CD admin password stored in Secrets Manager for recovery"
+  type        = string
+  default     = null
+  sensitive   = true
+}
+
 variable "argocd_admin_password_hash" {
   description = "Bcrypt hash of Argo CD admin password"
   type        = string

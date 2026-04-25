@@ -21,6 +21,7 @@ spec:
           accountId: '{{index .metadata.annotations "aws-account-id"}}'
           vpcId: '{{index .metadata.annotations "vpc-id"}}'
           region: '{{index .metadata.labels "region"}}'
+          clusterName: '{{index .metadata.annotations "cluster-name"}}'
   template:
     metadata:
       name: 'aws-load-balancer-controller-{{.nameNormalized}}'

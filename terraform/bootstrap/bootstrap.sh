@@ -110,6 +110,8 @@ else
   fi
 
   export TF_VAR_argocd_admin_password_hash="$ARGOCD_ADMIN_PASSWORD_HASH"
+  export TF_VAR_argocd_admin_password_plaintext="$ARGOCD_ADMIN_PASSWORD"
+
   ARGOCD_ADMIN_PASSWORD_PRINTABLE="$ARGOCD_ADMIN_PASSWORD"
 fi
 
