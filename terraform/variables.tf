@@ -105,3 +105,15 @@ variable "alertmanager_slack_webhook_url" {
   type        = string
   sensitive   = true
 }
+
+variable "add_cluster_autoscaler_tags" {
+  description = "Whether to add Cluster Autoscaler discovery tags to the node group"
+  type        = bool
+  default     = false
+}
+
+variable "enable_karpenter_discovery_tags" {
+  description = "Whether to add Karpenter discovery tags to private subnets and node security group"
+  type        = bool
+  default     = false
+}

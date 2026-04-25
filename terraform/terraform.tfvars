@@ -25,3 +25,6 @@ node_max_size     = 2
 environment    = "prod"
 
 domain_name    = "nabeem.com"
+
+add_cluster_autoscaler_tags = true
+enable_karpenter_discovery_tags = true
