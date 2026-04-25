@@ -26,6 +26,9 @@ spec:
         server:
           service:
             type: ClusterIP
+          
+          deploymentAnnotations:
+            reloader.stakater.com/auto: "true"
 
         global:
           nodeSelector:

@@ -37,6 +37,8 @@ spec:
           values: |
             grafana:
               enabled: true
+              annotations:
+                reloader.stakater.com/auto: "true"
               admin:
                 existingSecret: grafana-admin
                 userKey: admin-user
