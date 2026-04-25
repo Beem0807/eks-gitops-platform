@@ -85,7 +85,6 @@ spec:
                         - key: karpenter.sh/capacity-type
                           operator: In
                           values:
-                            - spot
                             - on-demand
 
                         - key: node.kubernetes.io/instance-type
