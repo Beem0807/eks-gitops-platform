@@ -8,6 +8,7 @@ module "vpc" {
   private_subnets                 = var.private_subnets
   tags                            = var.tags
   enable_karpenter_discovery_tags = true
+  cluster_name                    = var.enable_karpenter_discovery_tags ? var.cluster_name : null
 }
 
 module "eks" {
