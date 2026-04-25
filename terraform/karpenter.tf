@@ -7,15 +7,15 @@ module "karpenter" {
   namespace       = "karpenter"
   service_account = "karpenter"
 
-  create_node_iam_role = true
-  node_iam_role_name   = "${var.cluster_name}-karpenter-node"
+  create_iam_role = true
+  iam_role_name   = "${var.cluster_name}-karpenter-controller"
 
-  create_access_entry = true
+  create_pod_identity_association = true
 
-  enable_irsa              = true
-  irsa_oidc_provider_arn   = module.eks.oidc_provider_arn
-
-  create_pod_identity_association = false
+  create_node_iam_role   = true
+  node_iam_role_name     = "${var.cluster_name}-karpenter-node"
+  create_access_entry    = true
+  create_instance_profile = false
 
   enable_spot_termination = true
   queue_name              = "${var.cluster_name}-karpenter-interruption"

@@ -35,6 +35,18 @@ module "eks" {
       before_compute = true
       most_recent    = true
     }
+    eks-pod-identity-agent = {
+      most_recent = true
+      configuration_values = jsonencode({
+        tolerations = [
+          {
+            key      = "app"
+            operator = "Exists"
+            effect   = "NoSchedule"
+          }
+        ]
+      })
+    }
   }
 
   node_security_group_tags = merge(

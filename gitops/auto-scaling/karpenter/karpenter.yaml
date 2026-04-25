@@ -40,8 +40,6 @@ spec:
             serviceAccount:
               create: true
               name: karpenter
-              annotations:
-                eks.amazonaws.com/role-arn: arn:aws:iam::{{ .values.accountId }}:role/{{ .values.clusterName }}-karpenter-controller-irsa
 
             settings:
               clusterName: "{{ .values.clusterName }}"
