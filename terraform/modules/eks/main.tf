@@ -34,11 +34,15 @@ module "eks" {
     vpc-cni = {
       before_compute = true
       most_recent    = true
-      # configuration_values = jsonencode({
-      #   enableNetworkPolicy = "true"
-      # })
     }
   }
+
+  node_security_group_tags = merge(
+    var.tags,
+    var.enable_karpenter_discovery_tags ? {
+      "karpenter.sh/discovery" = var.cluster_name
+    } : {}
+  )
 
   node_security_group_additional_rules = var.enable_nlb_nodeport_rule ? {
     ingress_nlb_nodeports = {

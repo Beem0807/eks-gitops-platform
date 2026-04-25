@@ -59,3 +59,9 @@ variable "add_cluster_autoscaler_tags" {
   type        = bool
   default     = false
 }
+
+variable "enable_karpenter_discovery_tags" {
+  description = "Whether to add Karpenter discovery tags to private subnets and node security group"
+  type        = bool
+  default     = false
+}

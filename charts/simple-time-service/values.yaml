@@ -13,6 +13,13 @@ service:
   targetPort: 8080
   annotations: {}
 
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  tls: []
+
 resources:
   requests:
     cpu: 100m

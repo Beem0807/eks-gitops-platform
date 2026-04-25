@@ -19,28 +19,29 @@ spec:
         configs:
           params:
             server.insecure: true
+
         server:
           service:
             type: ClusterIP
-            
+
         global:
           nodeSelector:
             app: core
+
           tolerations:
             - key: app
               operator: Equal
               value: core
               effect: NoSchedule
-          commonLabels:
-            app.kubernetes.io/instance: argocd
-          podLabels:
-            app.kubernetes.io/instance: argocd
+
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
+
   syncPolicy:
     automated:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
+      - ClientSideApplyMigration=false

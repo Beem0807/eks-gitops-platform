@@ -28,3 +28,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "enable_karpenter_discovery_tags" {
+  description = "Whether to add Karpenter discovery tags to private subnets"
+  type        = bool
+  default     = false
+}

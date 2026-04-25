@@ -5,8 +5,13 @@ ROOT_DIR="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
 TF_DIR="${ROOT_DIR}/terraform"
 
 ARGOCD_NS="argocd"
-ARGOCD_INSTALL="${ROOT_DIR}/terraform/bootstrap/argocd-install.yaml"
 ROOT_APP="${ROOT_DIR}/gitops/bootstrap/root-app.yaml"
+
+ARGOCD_HELM_RELEASE="argocd"
+ARGOCD_HELM_REPO_NAME="argo"
+ARGOCD_HELM_REPO_URL="https://argoproj.github.io/argo-helm"
+ARGOCD_HELM_CHART="argo/argo-cd"
+ARGOCD_HELM_VERSION="9.4.17"
 
 echo "Running preflight checks..."
 
@@ -16,6 +21,7 @@ REQUIRED_COMMANDS=(
   kubectl
   openssl
   nslookup
+  helm
   sed
   seq
   git
@@ -43,11 +49,6 @@ if [[ -z "${TF_VAR_argocd_admin_password_hash:-}" ]]; then
       exit 1
     fi
   fi
-fi
-
-if [[ ! -f "$ARGOCD_INSTALL" ]]; then
-  echo "ERROR: Missing Argo CD install manifest: $ARGOCD_INSTALL"
-  exit 1
 fi
 
 if [[ ! -f "$ROOT_APP" ]]; then
@@ -183,8 +184,23 @@ done
 echo "Creating Argo CD namespace..."
 kubectl create namespace "$ARGOCD_NS" --dry-run=client -o yaml | kubectl apply -f -
 
-echo "Installing Argo CD..."
-kubectl apply -n "$ARGOCD_NS" -f "$ARGOCD_INSTALL"
+echo "Installing Argo CD using Helm..."
+helm repo add "$ARGOCD_HELM_REPO_NAME" "$ARGOCD_HELM_REPO_URL" >/dev/null 2>&1 || true
+helm repo update "$ARGOCD_HELM_REPO_NAME"
+
+helm upgrade --install "$ARGOCD_HELM_RELEASE" "$ARGOCD_HELM_CHART" \
+  --version "$ARGOCD_HELM_VERSION" \
+  --namespace "$ARGOCD_NS" \
+  --create-namespace \
+  --set configs.params."server\.insecure"=true \
+  --set server.service.type=ClusterIP \
+  --set global.nodeSelector.app=core \
+  --set global.tolerations[0].key=app \
+  --set global.tolerations[0].operator=Equal \
+  --set global.tolerations[0].value=core \
+  --set global.tolerations[0].effect=NoSchedule \
+  --wait \
+  --timeout 10m
 
 echo "Waiting for Argo CD..."
 kubectl rollout status deploy/argocd-server -n "$ARGOCD_NS" --timeout=10m
