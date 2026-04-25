@@ -19,6 +19,7 @@ spec:
             argocd.argoproj.io/secret-type: cluster
         values:
           clusterName: '{{index .metadata.annotations "cluster-name"}}'
+          amiAlias: 'al2023@v20260415'
   template:
     metadata:
       name: 'karpenter-nodepools-{{.nameNormalized}}'
@@ -42,6 +43,8 @@ spec:
                   name: workload
                 spec:
                   amiFamily: AL2023
+                  amiSelectorTerms:
+                    - alias: "{{ .values.amiAlias }}"
                   role: "{{ .values.clusterName }}-karpenter-node"
                   subnetSelectorTerms:
                     - tags:
