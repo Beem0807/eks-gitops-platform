@@ -3,6 +3,8 @@ kind: ApplicationSet
 metadata:
   name: alertmanager-slack
   namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
   labels:
     app.kubernetes.io/part-of: eks-gitops-platform
     app.kubernetes.io/managed-by: argocd
@@ -42,7 +44,9 @@ spec:
                 spec:
                   route:
                     receiver: slack
-                    groupBy: [alertname, namespace]
+                    groupBy:
+                      - alertname
+                      - namespace
                     groupWait: 30s
                     groupInterval: 5m
                     repeatInterval: 4h

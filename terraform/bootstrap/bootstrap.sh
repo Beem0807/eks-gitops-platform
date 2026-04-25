@@ -8,6 +8,127 @@ ARGOCD_NS="argocd"
 ARGOCD_INSTALL="${ROOT_DIR}/bootstrap/argocd-install.yaml"
 ROOT_APP="${ROOT_DIR}/gitops/bootstrap/root-app.yaml"
 
+echo "Running preflight checks..."
+
+REQUIRED_COMMANDS=(
+  terraform
+  aws
+  kubectl
+  openssl
+  nslookup
+  sed
+  seq
+)
+
+for cmd in "${REQUIRED_COMMANDS[@]}"; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "ERROR: Required command not found: $cmd"
+    exit 1
+  fi
+done
+
+# htpasswd is required only when Argo CD password hash is not already provided.
+if [[ -z "${TF_VAR_argocd_admin_password_hash:-}" ]]; then
+  if ! command -v htpasswd >/dev/null 2>&1; then
+    if [[ -x "/opt/homebrew/opt/httpd/bin/htpasswd" ]]; then
+      export PATH="/opt/homebrew/opt/httpd/bin:$PATH"
+    elif [[ -x "/usr/local/opt/httpd/bin/htpasswd" ]]; then
+      export PATH="/usr/local/opt/httpd/bin:$PATH"
+    else
+      echo "ERROR: htpasswd is required for Argo CD bcrypt hashing."
+      echo "Install on macOS using: brew install httpd"
+      echo "Then add to PATH if needed:"
+      echo "  export PATH=\"/opt/homebrew/opt/httpd/bin:\$PATH\""
+      exit 1
+    fi
+  fi
+fi
+
+if [[ ! -f "$ARGOCD_INSTALL" ]]; then
+  echo "ERROR: Missing Argo CD install manifest: $ARGOCD_INSTALL"
+  exit 1
+fi
+
+if [[ ! -f "$ROOT_APP" ]]; then
+  echo "ERROR: Missing root app manifest: $ROOT_APP"
+  exit 1
+fi
+
+if [[ ! -d "$TF_DIR" ]]; then
+  echo "ERROR: Terraform directory not found: $TF_DIR"
+  exit 1
+fi
+
+if [[ -z "${TF_VAR_alertmanager_slack_webhook_url:-}" ]]; then
+  echo "ERROR: TF_VAR_alertmanager_slack_webhook_url is required."
+  exit 1
+fi
+
+echo "Preflight checks passed."
+
+validate_bcrypt_hash() {
+  local hash="$1"
+
+  # Accept bcrypt prefixes: $2a$, $2b$, $2y$
+  if [[ "$hash" =~ ^\$2[aby]\$[0-9]{2}\$[./A-Za-z0-9]{53}$ ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
+ARGOCD_ADMIN_PASSWORD_PRINTABLE=""
+
+if [[ -n "${TF_VAR_argocd_admin_password_hash:-}" ]]; then
+  echo "Using provided TF_VAR_argocd_admin_password_hash."
+
+  if ! validate_bcrypt_hash "$TF_VAR_argocd_admin_password_hash"; then
+    echo "ERROR: TF_VAR_argocd_admin_password_hash is not a valid bcrypt hash."
+    echo "Expected format like: \$2a\$10\$xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    exit 1
+  fi
+
+  ARGOCD_ADMIN_PASSWORD_PRINTABLE="<not available because hash was provided directly>"
+
+else
+  ARGOCD_ADMIN_PASSWORD="${ARGOCD_ADMIN_PASSWORD:-}"
+
+  if [[ -z "$ARGOCD_ADMIN_PASSWORD" ]]; then
+    ARGOCD_ADMIN_PASSWORD="$(openssl rand -base64 24)"
+    echo "Generated Argo CD admin password."
+  else
+    echo "Using provided ARGOCD_ADMIN_PASSWORD."
+  fi
+
+  ARGOCD_ADMIN_PASSWORD_HASH="$(htpasswd -bnBC 10 "" "$ARGOCD_ADMIN_PASSWORD" | tr -d ':\n')"
+
+  if ! validate_bcrypt_hash "$ARGOCD_ADMIN_PASSWORD_HASH"; then
+    echo "ERROR: Generated Argo CD bcrypt hash is invalid."
+    exit 1
+  fi
+
+  export TF_VAR_argocd_admin_password_hash="$ARGOCD_ADMIN_PASSWORD_HASH"
+  ARGOCD_ADMIN_PASSWORD_PRINTABLE="$ARGOCD_ADMIN_PASSWORD"
+fi
+
+if [[ -n "${TF_VAR_grafana_admin_password:-}" ]]; then
+  echo "Using provided TF_VAR_grafana_admin_password."
+  GRAFANA_ADMIN_PASSWORD_PRINTABLE="$TF_VAR_grafana_admin_password"
+
+else
+  GRAFANA_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-}"
+
+  if [[ -z "$GRAFANA_ADMIN_PASSWORD" ]]; then
+    GRAFANA_ADMIN_PASSWORD="$(openssl rand -base64 24)"
+    echo "Generated Grafana admin password."
+  else
+    echo "Using provided GRAFANA_ADMIN_PASSWORD."
+  fi
+
+  export TF_VAR_grafana_admin_password="$GRAFANA_ADMIN_PASSWORD"
+  GRAFANA_ADMIN_PASSWORD_PRINTABLE="$GRAFANA_ADMIN_PASSWORD"
+fi
+
 echo "Running Terraform..."
 cd "$TF_DIR"
 terraform init
@@ -16,6 +137,8 @@ terraform apply -auto-approve
 CLUSTER_NAME="$(terraform output -raw cluster_name)"
 AWS_REGION="$(terraform output -raw region)"
 AWS_ACCOUNT_ID="$(terraform output -raw account_id)"
+VPC_ID="$(terraform output -raw vpc_id)"
+DOMAIN_NAME="$(terraform output -raw domain_name)"
 
 echo "Updating kubeconfig..."
 aws eks update-kubeconfig \
@@ -81,6 +204,9 @@ metadata:
     cloud: aws
   annotations:
     aws-account-id: "${AWS_ACCOUNT_ID}"
+    cluster-name: "${CLUSTER_NAME}"
+    vpc-id: "${VPC_ID}"
+    domain-name: "${DOMAIN_NAME}"
 type: Opaque
 stringData:
   name: in-cluster-local

@@ -3,6 +3,8 @@ kind: ApplicationSet
 metadata:
   name: prometheus
   namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
   labels:
     app.kubernetes.io/part-of: eks-gitops-platform
     app.kubernetes.io/managed-by: argocd
@@ -15,6 +17,8 @@ spec:
         selector:
           matchLabels:
             argocd.argoproj.io/secret-type: cluster
+          values:
+            domainName: '{{index .metadata.annotations "domain-name"}}'
   template:
     metadata:
       name: 'prometheus-{{.nameNormalized}}'
@@ -33,14 +37,55 @@ spec:
           values: |
             grafana:
               enabled: true
+              admin:
+                existingSecret: grafana-admin
+                userKey: admin-user
+                passwordKey: admin-password
               tolerations:
                 - key: "app"
                   operator: "Equal"
                   value: "core"
                   effect: "NoSchedule"
+              ingress:
+                enabled: true
+                ingressClassName: alb
+                annotations:
+                  alb.ingress.kubernetes.io/scheme: internet-facing
+                  alb.ingress.kubernetes.io/target-type: ip
+                  alb.ingress.kubernetes.io/backend-protocol: HTTP
+                  alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+                  alb.ingress.kubernetes.io/ssl-redirect: "443"
+                  alb.ingress.kubernetes.io/healthcheck-path: /api/health
+                  alb.ingress.kubernetes.io/group.name: platform-observability
+                hosts:
+                  - grafana.platform.{{ .values.domainName }}
+                path: /
+                pathType: Prefix
+                tls:
+                  - hosts:
+                      - grafana.platform.{{ .values.domainName }}
 
             alertmanager:
               enabled: true
+              ingress:
+                enabled: true
+                ingressClassName: alb
+                annotations:
+                  alb.ingress.kubernetes.io/scheme: internet-facing
+                  alb.ingress.kubernetes.io/target-type: ip
+                  alb.ingress.kubernetes.io/backend-protocol: HTTP
+                  alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+                  alb.ingress.kubernetes.io/ssl-redirect: "443"
+                  alb.ingress.kubernetes.io/healthcheck-path: /-/ready
+                  alb.ingress.kubernetes.io/group.name: platform-observability
+                hosts:
+                  - alertmanager.platform.{{ .values.domainName }}
+                paths:
+                  - /
+                pathType: Prefix
+                tls:
+                  - hosts:
+                      - alertmanager.platform.{{ .values.domainName }}
               alertmanagerSpec:
                 alertmanagerConfigSelector: {}
                 alertmanagerConfigNamespaceSelector: {}
@@ -53,6 +98,25 @@ spec:
                     effect: "NoSchedule"
 
             prometheus:
+              ingress:
+                enabled: true
+                ingressClassName: alb
+                annotations:
+                  alb.ingress.kubernetes.io/scheme: internet-facing
+                  alb.ingress.kubernetes.io/target-type: ip
+                  alb.ingress.kubernetes.io/backend-protocol: HTTP
+                  alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+                  alb.ingress.kubernetes.io/ssl-redirect: "443"
+                  alb.ingress.kubernetes.io/healthcheck-path: /-/ready
+                  alb.ingress.kubernetes.io/group.name: platform-observability
+                hosts:
+                  - prometheus.platform.{{ .values.domainName }}
+                paths:
+                  - /
+                pathType: Prefix
+                tls:
+                  - hosts:
+                      - prometheus.platform.{{ .values.domainName }}
               prometheusSpec:
                 retention: 7d
                 serviceMonitorSelectorNilUsesHelmValues: false

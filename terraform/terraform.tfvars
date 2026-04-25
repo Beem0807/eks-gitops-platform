@@ -23,3 +23,5 @@ node_min_size     = 2
 node_max_size     = 2
 
 environment    = "prod"
+
+domain_name    = "nabeem.com"

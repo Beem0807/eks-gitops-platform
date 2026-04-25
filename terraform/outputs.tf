@@ -12,3 +12,13 @@ output "account_id" {
   description = "AWS account ID"
   value       = data.aws_caller_identity.current.account_id
 }
+
+output "vpc_id" {
+  description = "VPC ID"
+  value       = module.vpc.vpc_id
+}
+
+output "domain_name" {
+  description = "Route53 Domain Name"
+  value       = var.domain_name
+}

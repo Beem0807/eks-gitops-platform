@@ -17,6 +17,8 @@ spec:
             argocd.argoproj.io/secret-type: cluster
         values:
           accountId: '{{index .metadata.annotations "aws-account-id"}}'
+          clusterName: '{{index .metadata.annotations "cluster-name"}}'
+          region: '{{index .metadata.labels "region"}}'
   template:
     metadata:
       name: 'cluster-autoscaler-{{.nameNormalized}}'
@@ -36,9 +38,9 @@ spec:
             cloudProvider: aws
 
             autoDiscovery:
-              clusterName: simple-eks
+              clusterName: {{ .values.clusterName }}
 
-            awsRegion: ap-south-1
+            awsRegion: {{ .values.region }}
 
             image:
               tag: v1.33.0
@@ -48,7 +50,7 @@ spec:
                 create: true
                 name: cluster-autoscaler
                 annotations:
-                  eks.amazonaws.com/role-arn: arn:aws:iam::{{ .values.accountId }}:role/simple-eks-cluster-autoscaler-irsa
+                  eks.amazonaws.com/role-arn: arn:aws:iam::{{ .values.accountId }}:role/{{ .values.clusterName }}-cluster-autoscaler-irsa
 
             extraArgs:
               balance-similar-node-groups: "true"

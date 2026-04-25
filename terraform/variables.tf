@@ -76,3 +76,32 @@ variable "environment" {
   type        = string
   default     = "prod"
 }
+
+variable "domain_name" {
+  description = "Route53 Domain Name"
+  type        = string
+}
+
+variable "argocd_admin_password_hash" {
+  description = "Bcrypt hash of Argo CD admin password"
+  type        = string
+  sensitive   = true
+}
+
+variable "grafana_admin_user" {
+  description = "Grafana admin username"
+  type        = string
+  default     = "admin"
+}
+
+variable "grafana_admin_password" {
+  description = "Grafana admin password"
+  type        = string
+  sensitive   = true
+}
+
+variable "alertmanager_slack_webhook_url" {
+  description = "Slack webhook URL for Alertmanager"
+  type        = string
+  sensitive   = true
+}
