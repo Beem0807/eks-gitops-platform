@@ -31,6 +31,8 @@ spec:
               operator: Equal
               value: core
               effect: NoSchedule
+          commonLabels:
+            app.kubernetes.io/instance: argocd
           podLabels:
             app.kubernetes.io/instance: argocd
   destination:
