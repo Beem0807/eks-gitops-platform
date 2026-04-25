@@ -19,6 +19,9 @@ spec:
         configs:
           params:
             server.insecure: true
+          
+          secret:
+            createSecret: false
 
         server:
           service:
