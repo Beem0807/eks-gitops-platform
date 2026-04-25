@@ -1,6 +1,12 @@
+resource "time_static" "argocd_admin_password_mtime" {
+  triggers = {
+    password_hash = var.argocd_admin_password_hash
+  }
+}
+
 resource "aws_secretsmanager_secret" "argocd_admin" {
   name        = "argocd-admin"
-  description = "Argo CD admin password hash"
+  description = "Argo CD admin password hash managed through External Secrets Operator"
 
   tags = merge(var.tags, {
     ExternalSecret = "true"
@@ -12,7 +18,7 @@ resource "aws_secretsmanager_secret_version" "argocd_admin" {
 
   secret_string = jsonencode({
     adminPasswordHash  = var.argocd_admin_password_hash
-    adminPasswordMtime = var.argocd_admin_password_mtime
+    adminPasswordMtime = time_static.argocd_admin_password_mtime.rfc3339
   })
 }
 

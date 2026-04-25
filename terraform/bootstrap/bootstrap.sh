@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
 TF_DIR="${ROOT_DIR}/terraform"
 
 ARGOCD_NS="argocd"
-ARGOCD_INSTALL="${ROOT_DIR}/bootstrap/argocd-install.yaml"
+ARGOCD_INSTALL="${ROOT_DIR}/terraform/bootstrap/argocd-install.yaml"
 ROOT_APP="${ROOT_DIR}/gitops/bootstrap/root-app.yaml"
 
 echo "Running preflight checks..."
@@ -18,6 +18,7 @@ REQUIRED_COMMANDS=(
   nslookup
   sed
   seq
+  git
 )
 
 for cmd in "${REQUIRED_COMMANDS[@]}"; do
