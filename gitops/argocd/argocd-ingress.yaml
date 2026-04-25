@@ -17,8 +17,8 @@ spec:
         selector:
           matchLabels:
             argocd.argoproj.io/secret-type: cluster
-          values:
-            domainName: '{{index .metadata.annotations "domain-name"}}'
+        values:
+          domainName: '{{index .metadata.annotations "domain-name"}}'
   template:
     metadata:
       name: 'argocd-ingress-{{.nameNormalized}}'
@@ -53,9 +53,9 @@ spec:
                   ingressClassName: alb
                   tls:
                     - hosts:
-                        - argocd.platform.{{ .values.domainName }}
+                        - "argocd.platform.{{ .values.domainName }}"
                   rules:
-                    - host: argocd.platform.{{ .values.domainName }}
+                    - host: "argocd.platform.{{ .values.domainName }}"
                       http:
                         paths:
                           - path: /
