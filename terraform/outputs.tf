@@ -22,3 +22,7 @@ output "domain_name" {
   description = "Route53 Domain Name"
   value       = var.domain_name
 }
+
+output "karpenter_instance_profile_name" {
+  value = module.karpenter.instance_profile_name
+}

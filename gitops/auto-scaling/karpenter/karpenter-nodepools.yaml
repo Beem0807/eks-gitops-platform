@@ -19,6 +19,7 @@ spec:
             argocd.argoproj.io/secret-type: cluster
         values:
           clusterName: '{{index .metadata.annotations "cluster-name"}}'
+          instanceProfileName: '{{index .metadata.annotations "karpenter-instance-profile-name"}}'
           amiAlias: 'al2023@v20260415'
   template:
     metadata:
@@ -45,7 +46,7 @@ spec:
                   amiFamily: AL2023
                   amiSelectorTerms:
                     - alias: "{{ .values.amiAlias }}"
-                  role: "{{ .values.clusterName }}-karpenter-node"
+                  instanceProfile: "{{ .values.instanceProfileName }}"
                   subnetSelectorTerms:
                     - tags:
                         karpenter.sh/discovery: "{{ .values.clusterName }}"

@@ -15,7 +15,7 @@ module "karpenter" {
   create_node_iam_role   = true
   node_iam_role_name     = "${var.cluster_name}-karpenter-node"
   create_access_entry    = true
-  create_instance_profile = false
+  create_instance_profile = true
 
   enable_spot_termination = true
   queue_name              = "${var.cluster_name}-karpenter-interruption"

@@ -143,6 +143,7 @@ AWS_REGION="$(terraform output -raw region)"
 AWS_ACCOUNT_ID="$(terraform output -raw account_id)"
 VPC_ID="$(terraform output -raw vpc_id)"
 DOMAIN_NAME="$(terraform output -raw domain_name)"
+KARPENTER_INSTANCE_PROFILE_NAME="$(terraform output -raw karpenter_instance_profile_name)"
 
 echo "Updating kubeconfig..."
 aws eks update-kubeconfig \
@@ -226,6 +227,7 @@ metadata:
     cluster-name: "${CLUSTER_NAME}"
     vpc-id: "${VPC_ID}"
     domain-name: "${DOMAIN_NAME}"
+    karpenter-instance-profile-name: "${KARPENTER_INSTANCE_PROFILE_NAME}"
 type: Opaque
 stringData:
   name: in-cluster-local
