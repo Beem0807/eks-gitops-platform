@@ -17,8 +17,8 @@ spec:
         selector:
           matchLabels:
             argocd.argoproj.io/secret-type: cluster
-          values:
-            domainName: '{{index .metadata.annotations "domain-name"}}'
+        values:
+          domainName: '{{index .metadata.annotations "domain-name"}}'
   template:
     metadata:
       name: 'prometheus-{{.nameNormalized}}'
