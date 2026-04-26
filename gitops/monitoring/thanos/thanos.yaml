@@ -44,26 +44,7 @@ spec:
               registry: quay.io
               repository: thanos/thanos
               tag: v0.39.2
-            serviceAccount:
-              create: true
-              name: thanos
-              annotations:
-                eks.amazonaws.com/role-arn: arn:aws:iam::{{ .values.accountId }}:role/{{ .values.clusterName }}-thanos-components-irsa
             existingObjstoreSecret: thanos-objstore-config
-            query:
-              enabled: true
-              replicaCount: 1
-              dnsDiscovery:
-                enabled: true
-                sidecarsService: prometheus-kube-prometheus-thanos-discovery
-                sidecarsNamespace: monitoring
-              nodeSelector:
-                app: core
-              tolerations:
-                - key: app
-                  operator: Equal
-                  value: core
-                  effect: NoSchedule
 
             queryFrontend:
               enabled: false
@@ -78,6 +59,11 @@ spec:
               retentionResolution1h: 180d
               persistence:
                 enabled: false
+              serviceAccount:
+                create: true
+                name: thanos-compactor
+                annotations:
+                  eks.amazonaws.com/role-arn: arn:aws:iam::{{ .values.accountId }}:role/{{ .values.clusterName }}-thanos-components-irsa
               nodeSelector:
                 app: core
               tolerations:
@@ -90,6 +76,11 @@ spec:
               enabled: true
               persistence:
                 enabled: false
+              serviceAccount:
+                create: true
+                name: thanos-compactor
+                annotations:
+                  eks.amazonaws.com/role-arn: arn:aws:iam::{{ .values.accountId }}:role/{{ .values.clusterName }}-thanos-components-irsa
               nodeSelector:
                 app: core
               tolerations:

@@ -40,7 +40,8 @@ data "aws_iam_policy_document" "thanos_s3" {
 
     actions = [
       "s3:ListBucket",
-      "s3:GetBucketLocation"
+      "s3:GetBucketLocation",
+      "s3:ListBucketMultipartUploads"
     ]
 
     resources = [
@@ -55,7 +56,9 @@ data "aws_iam_policy_document" "thanos_s3" {
     actions = [
       "s3:GetObject",
       "s3:PutObject",
-      "s3:DeleteObject"
+      "s3:DeleteObject",
+      "s3:AbortMultipartUpload",
+      "s3:ListMultipartUploadParts"
     ]
 
     resources = [
@@ -108,7 +111,8 @@ module "thanos_components_irsa" {
       provider_arn = module.eks.oidc_provider_arn
 
       namespace_service_accounts = [
-        "monitoring:thanos"
+        "monitoring:thanos-compactor",
+        "monitoring:thanos-storegateway"
       ]
     }
   }
