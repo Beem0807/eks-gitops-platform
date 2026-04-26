@@ -157,5 +157,24 @@ stringData:
     }
 EOF
 
+REFRESH_TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+echo "Refreshing ExternalSecrets..."
+
+kubectl annotate externalsecret argocd-admin \
+  -n argocd \
+  force-sync="${REFRESH_TS}" \
+  --overwrite || true
+
+kubectl annotate externalsecret grafana-admin \
+  -n monitoring \
+  force-sync="${REFRESH_TS}" \
+  --overwrite || true
+
+kubectl annotate externalsecret alertmanager-webhook \
+  -n monitoring \
+  force-sync="${REFRESH_TS}" \
+  --overwrite || true
+
 echo
 echo "Upgrade completed successfully."
