@@ -35,6 +35,9 @@ spec:
         helm:
           releaseName: prometheus
           values: |
+            crds:
+              enabled: false
+            
             grafana:
               enabled: true
               annotations:
@@ -44,6 +47,21 @@ spec:
                 existingSecret: grafana-admin
                 userKey: admin-user
                 passwordKey: admin-password
+              
+              sidecar:
+                datasources:
+                  defaultDatasourceEnabled: false
+              
+              additionalDataSources:
+                - name: Thanos
+                  type: prometheus
+                  uid: thanos
+                  access: proxy
+                  url: http://thanos-query.monitoring.svc.cluster.local:9090
+                  isDefault: true
+                  jsonData:
+                    timeInterval: 30s
+              
               tolerations:
                 - key: "app"
                   operator: "Equal"
@@ -71,34 +89,12 @@ spec:
             alertmanager:
               enabled: true
               ingress:
-                enabled: true
-                ingressClassName: alb
-                annotations:
-                  alb.ingress.kubernetes.io/scheme: internet-facing
-                  alb.ingress.kubernetes.io/target-type: ip
-                  alb.ingress.kubernetes.io/backend-protocol: HTTP
-                  alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
-                  alb.ingress.kubernetes.io/ssl-redirect: "443"
-                  alb.ingress.kubernetes.io/healthcheck-path: /-/ready
-                  alb.ingress.kubernetes.io/group.name: platform-observability
-                hosts:
-                  - alertmanager.platform.{{ .values.domainName }}
-                paths:
-                  - /
-                pathType: Prefix
-                tls:
-                  - hosts:
-                      - alertmanager.platform.{{ .values.domainName }}
+                enabled: false
               alertmanagerSpec:
                 alertmanagerConfigSelector: {}
                 alertmanagerConfigNamespaceSelector: {}
                 alertmanagerConfigMatcherStrategy:
                   type: None
-                secrets:
-                  - alertmanager-web-config
-                additionalArgs:
-                  - name: web.config.file
-                    value: /etc/alertmanager/secrets/alertmanager-web-config/web-config.yaml
                 tolerations:
                   - key: "app"
                     operator: "Equal"
@@ -107,36 +103,27 @@ spec:
 
             prometheus:
               ingress:
+                enabled: false
+              thanosService:
                 enabled: true
-                ingressClassName: alb
+              thanosServiceMonitor:
+                enabled: true
+              serviceAccount:
                 annotations:
-                  alb.ingress.kubernetes.io/scheme: internet-facing
-                  alb.ingress.kubernetes.io/target-type: ip
-                  alb.ingress.kubernetes.io/backend-protocol: HTTP
-                  alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
-                  alb.ingress.kubernetes.io/ssl-redirect: "443"
-                  alb.ingress.kubernetes.io/healthcheck-path: /-/ready
-                  alb.ingress.kubernetes.io/group.name: platform-observability
-                hosts:
-                  - prometheus.platform.{{ .values.domainName }}
-                paths:
-                  - /
-                pathType: Prefix
-                tls:
-                  - hosts:
-                      - prometheus.platform.{{ .values.domainName }}
+                  eks.amazonaws.com/role-arn: arn:aws:iam::{{ .values.accountId }}:role/{{ .values.clusterName }}-thanos-prometheus-irsa
               prometheusSpec:
+                serviceMonitorSelectorNilUsesHelmValues: false
                 retention: 7d
-                secrets:
-                  - prometheus-web-config
-                additionalArgs:
-                  - name: web.config.file
-                    value: /etc/prometheus/secrets/prometheus-web-config/web-config.yaml
                 tolerations:
                   - key: "app"
                     operator: "Equal"
                     value: "core"
                     effect: "NoSchedule"
+                thanos:
+                  image: quay.io/thanos/thanos:v0.39.2
+                  objectStorageConfig:
+                    name: thanos-objstore-config
+                    key: objstore.yml
 
             prometheusOperator:
               tolerations:
@@ -159,9 +146,17 @@ spec:
                   effect: "NoSchedule"
 
             prometheus-node-exporter:
+              enabled: true
               tolerations:
                 - operator: "Exists"
                   effect: "NoSchedule"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 64Mi
 
             # kube-scheduler and kube-controller-manager are managed by AWS on EKS
             # and are not exposed for Prometheus scraping - disable these rules to avoid noise

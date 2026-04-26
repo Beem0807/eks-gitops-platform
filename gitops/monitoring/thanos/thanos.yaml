@@ -1,0 +1,109 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: thanos
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "6"
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: monitoring
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            argocd.argoproj.io/secret-type: cluster
+  template:
+    metadata:
+      name: 'thanos-{{.nameNormalized}}'
+      labels:
+        app.kubernetes.io/part-of: eks-gitops-platform
+        app.kubernetes.io/managed-by: argocd
+        app.kubernetes.io/component: monitoring
+    spec:
+      project: default
+      source:
+        repoURL: registry-1.docker.io/bitnamicharts
+        chart: thanos
+        targetRevision: 16.0.7
+        helm:
+          releaseName: thanos
+          values: |
+            serviceAccount:
+              create: true
+              name: thanos
+              annotations:
+                eks.amazonaws.com/role-arn: arn:aws:iam::{{ .values.accountId }}:role/{{ .values.clusterName }}-thanos-components-irsa
+            existingObjstoreSecret: thanos-objstore-config
+            query:
+              enabled: true
+              replicaCount: 1
+              dnsDiscovery:
+                enabled: true
+                sidecarsService: prometheus-kube-prometheus-thanos-discovery
+                sidecarsNamespace: monitoring
+              nodeSelector:
+                app: core
+              tolerations:
+                - key: app
+                  operator: Equal
+                  value: core
+                  effect: NoSchedule
+
+            queryFrontend:
+              enabled: false
+
+            bucketweb:
+              enabled: false
+
+            compactor:
+              enabled: true
+              retentionResolutionRaw: 30d
+              retentionResolution5m: 90d
+              retentionResolution1h: 180d
+              persistence:
+                enabled: false
+              nodeSelector:
+                app: core
+              tolerations:
+                - key: app
+                  operator: Equal
+                  value: core
+                  effect: NoSchedule
+
+            storegateway:
+              enabled: true
+              persistence:
+                enabled: false
+              nodeSelector:
+                app: core
+              tolerations:
+                - key: app
+                  operator: Equal
+                  value: core
+                  effect: NoSchedule
+
+            receive:
+              enabled: false
+
+            ruler:
+              enabled: false
+
+            metrics:
+              enabled: true
+              serviceMonitor:
+                enabled: true
+      destination:
+        server: '{{.server}}'
+        namespace: monitoring
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true

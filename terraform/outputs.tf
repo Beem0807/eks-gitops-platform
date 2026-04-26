@@ -26,3 +26,7 @@ output "domain_name" {
 output "karpenter_instance_profile_name" {
   value = module.karpenter.instance_profile_name
 }
+
+output "thanos_bucket_name" {
+  value = aws_s3_bucket.thanos.bucket
+}
