@@ -33,7 +33,7 @@ spec:
         helm:
           releaseName: prometheus-adapter
           values: |
-            replicas: 1
+            replicas: 2
 
             prometheus:
               url: http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local
@@ -58,7 +58,7 @@ spec:
 
             podDisruptionBudget:
               enabled: true
-              minAvailable: 1
+              maxUnavailable: 1
 
             livenessProbe:
               failureThreshold: 10

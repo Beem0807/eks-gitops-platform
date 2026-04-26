@@ -36,6 +36,10 @@ spec:
         helm:
           releaseName: thanos
           values: |
+            global:
+              security:
+                allowInsecureImages: true
+            
             image:
               registry: quay.io
               repository: thanos/thanos
