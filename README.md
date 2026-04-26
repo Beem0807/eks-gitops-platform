@@ -5,8 +5,14 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 | Component | What it does |
 |-----------|-------------|
 | **SimpleTimeService** | Minimal Python microservice - returns timestamp + caller IP as JSON |
-| **Terraform** | Provisions AWS VPC and EKS cluster |
-| **ArgoCD (App of Apps)** | GitOps engine - all platform components self-reconcile from this repo |
+| **Terraform** | Provisions AWS VPC, EKS cluster, IRSA roles, Karpenter, and Secrets Manager secrets |
+| **ArgoCD (App of Apps)** | GitOps engine - self-managed via Helm, all platform components reconcile from this repo |
+| **AWS Load Balancer Controller** | Provisions ALB Ingress for services and ArgoCD |
+| **External DNS** | Creates Route53 DNS records from Ingress/Service annotations |
+| **Cluster Autoscaler** | Scales the managed node group based on pending pods |
+| **Karpenter** | Provisions workload nodes on-demand (`t3a.medium` / `c6a.large`) |
+| **External Secrets Operator** | Syncs AWS Secrets Manager secrets into Kubernetes Secrets |
+| **Reloader** | Rolls Deployments automatically when referenced Secrets or ConfigMaps change |
 | **Prometheus + Grafana** | Metrics collection, pre-built dashboard, Slack alerting |
 | **HPA + metrics-server** | Horizontal pod autoscaling based on CPU utilization |
 | **Loki + Fluent Bit** | Centralized log aggregation, queryable in Grafana |
@@ -54,7 +60,7 @@ Two paths to a running service - pick one.
 One `terraform apply` provisions the VPC, EKS cluster, and the Helm release. The service is immediately reachable on a public NLB - no ArgoCD required.
 
 ```bash
-cd terraform/bootstrap && terraform init && terraform apply
+cd terraform/app-bootstrap && terraform init && terraform apply
 
 aws eks update-kubeconfig --region ap-south-1 --name simple-eks
 
@@ -66,31 +72,23 @@ curl $(terraform output -raw application_url)
 Terraform provisions infrastructure only. ArgoCD takes over everything else - the service, monitoring, autoscaling, and logging all reconcile from this repo.
 
 ```bash
-# 1. Provision infrastructure
-cd terraform && terraform init && terraform apply
+# 1. Set required env vars (Slack webhook required; passwords are auto-generated if omitted)
+export TF_VAR_alertmanager_slack_webhook_url="https://hooks.slack.com/..."
+# export ARGOCD_ADMIN_PASSWORD="<your-password>"
+# export TF_VAR_grafana_admin_password="<your-password>"
 
-# 2. Connect kubectl
-aws eks update-kubeconfig --region ap-south-1 --name simple-eks
+# 2. Run the bootstrap script - provisions infra, installs ArgoCD via Helm, applies root app
+bash terraform/bootstrap/bootstrap.sh
 
-# 3. Install ArgoCD
-kubectl create namespace argocd
-kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
-kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n argocd
+# The script prints all credentials at completion. All UIs are accessible via HTTPS:
+# ArgoCD:       https://argocd.platform.<your-domain>
+# Service:      https://simple-time-service.platform.<your-domain>
+# Grafana:      https://grafana.platform.<your-domain>
+# Prometheus:   https://prometheus.platform.<your-domain>
+# Alertmanager: https://alertmanager.platform.<your-domain>
 
-# 4. Bootstrap - this one command starts everything
-kubectl apply -f gitops/bootstrap/root-app.yaml
-
-# 5. Watch it come up (takes up to 3 minutes for first reconciliation)
-kubectl port-forward svc/argocd-server -n argocd 8080:443
-# Open https://localhost:8080
-
-# 6. Verify the service
-kubectl port-forward svc/simple-time-service -n simple-time-service 8080:80
-curl http://127.0.0.1:8080/
-
-# 7. Verify Grafana
-kubectl port-forward svc/prometheus-grafana -n monitoring 3000:80
-# Open http://localhost:3000
+# 3. Watch ArgoCD reconcile (optional, takes up to 3 minutes for first sync)
+kubectl get applications -n argocd -w
 ```
 
 ---
@@ -101,9 +99,9 @@ kubectl port-forward svc/prometheus-grafana -n monitoring 3000:80
 |---|---------------|-----|
 | 1 | Cluster is up | `kubectl get nodes` - all `Ready` |
 | 2 | ArgoCD synced *(GitOps path)* | `argocd app get root-app` - `Synced / Healthy` |
-| 3 | Service responds | **Bootstrap:** `curl http://$(terraform -chdir=terraform/bootstrap output -raw application_nlb_hostname)/` **GitOps:** port-forward then `curl http://127.0.0.1:8080/` - returns `timestamp` + `ip` JSON |
-| 4 | Prometheus scraping | Port-forward Prometheus → `http://localhost:9090/targets` - `simple-time-service` shows `UP` |
-| 5 | Grafana dashboard live | `http://localhost:3000` - SimpleTimeService dashboard has data |
+| 3 | Service responds | **Bootstrap:** `curl http://$(terraform -chdir=terraform/app-bootstrap output -raw application_url)/` **GitOps:** `curl https://simple-time-service.platform.<your-domain>/` - returns `timestamp` + `ip` JSON |
+| 4 | Prometheus scraping | Open `https://prometheus.platform.<your-domain>/targets` - `simple-time-service` shows `UP` |
+| 5 | Grafana dashboard live | Open `https://grafana.platform.<your-domain>` - SimpleTimeService dashboard has data |
 | 6 | HPA reacts to load | `kubectl get hpa -n simple-time-service -w` while running `python3 scripts/load_test.py` |
 | 7 | Slack alert fires | Fire test alert (see [gitops/alerts/README.md](gitops/alerts/README.md#testing-the-slack-receiver)) - appears in `#alerts-test` within 30s |
 | 8 | Loki API reachable | `kubectl port-forward svc/loki-gateway -n logging 3100:80` → `curl 'http://localhost:3100/loki/api/v1/labels'` |
@@ -147,29 +145,51 @@ kubectl port-forward svc/prometheus-grafana -n monitoring 3000:80
 ├── gitops/
 │   ├── bootstrap/
 │   │   └── root-app.yaml                       # ArgoCD root Application - bootstraps everything below
+│   ├── argocd/
+│   │   ├── argocd.yaml                         # Application - ArgoCD self-managed via Helm
+│   │   ├── argocd-admin-secret.yaml            # ApplicationSet - ExternalSecret for ArgoCD admin password
+│   │   └── argocd-ingress.yaml                 # ApplicationSet - ALB Ingress at argocd.platform.<domain>
 │   ├── app/
-│   │   └── simple-time-service.yaml            # ApplicationSet - Helm deploy to every registered cluster
-│   ├── metrics-server/
-│   │   └── metrics-server.yaml                 # ApplicationSet - metrics-server (HPA prerequisite)
+│   │   └── simple-time-service/
+│   │       └── simple-time-service.yaml        # ApplicationSet - Helm deploy with ALB Ingress
+│   ├── auto-scaling/
+│   │   ├── cluster-autoscaler/
+│   │   │   └── cluster-autoscaler.yaml         # ApplicationSet - Cluster Autoscaler
+│   │   ├── karpenter/
+│   │   │   ├── karpenter.yaml                  # ApplicationSet - Karpenter controller (sync-wave 2)
+│   │   │   └── karpenter-nodepools.yaml        # ApplicationSet - EC2NodeClass + NodePool (sync-wave 3)
+│   │   └── metrics-server/
+│   │       └── metrics-server.yaml             # ApplicationSet - metrics-server (HPA prerequisite)
+│   ├── networking/
+│   │   ├── ingress-controller/
+│   │   │   └── aws-load-balancer-controller.yaml  # ApplicationSet - AWS Load Balancer Controller
+│   │   └── external-dns/
+│   │       └── external-dns.yaml               # ApplicationSet - ExternalDNS for Route53
+│   ├── secrets/
+│   │   ├── external-secrets/
+│   │   │   ├── external-secret-operator.yaml   # ApplicationSet - External Secrets Operator
+│   │   │   └── cluster-secret-store.yaml       # ApplicationSet - ClusterSecretStore (sync-wave 2)
+│   │   └── reloader/
+│   │       └── reloader.yaml                   # ApplicationSet - Stakater Reloader
 │   ├── monitoring/
 │   │   ├── prometheus/
-│   │   │   └── prometheus.yaml                 # ApplicationSet - kube-prometheus-stack
+│   │   │   └── prometheus.yaml                 # ApplicationSet - kube-prometheus-stack (sync-wave 4)
 │   │   └── grafana/
+│   │       ├── grafana-admin-secret.yaml       # ApplicationSet - ExternalSecret for Grafana credentials
 │   │       └── simple-time-service-dashboard.yaml  # ApplicationSet - Grafana dashboard ConfigMap
 │   ├── alerts/
 │   │   ├── simple-time-service-alerts.yaml     # ApplicationSet - PrometheusRule (alert expressions)
+│   │   ├── alertmanager-webhook-secret.yaml    # ApplicationSet - ExternalSecret for Slack webhook
 │   │   └── alertmanager-slack.yaml             # ApplicationSet - AlertmanagerConfig (Slack routing)
 │   └── logs/
 │       ├── loki/
-│       │   ├── loki.yaml                       # ApplicationSet - Loki single-binary log store
-│       │   └── grafana-loki-datasource.yaml    # ApplicationSet - Loki datasource ConfigMap for Grafana
+│       │   ├── loki.yaml                       # ApplicationSet - Loki single-binary log store (sync-wave 3)
+│       │   └── grafana-loki-datasource.yaml    # ApplicationSet - Loki datasource ConfigMap (sync-wave 4)
 │       └── fluent-bit/
-│           └── fluent-bit.yaml                 # ApplicationSet - Fluent Bit DaemonSet (collector → Loki)
+│           └── fluent-bit.yaml                 # ApplicationSet - Fluent Bit DaemonSet (sync-wave 4)
 ├── scripts/
 │   ├── load_test.py                            # Python load generator (no dependencies)
 │   └── k6-staged.js                            # k6 staged ramping-arrival-rate scenario
-├── secrets/
-│   └── alertmanager-config.example.yaml        # Slack webhook secret template (fill in and apply; gitignored)
 ├── docs/
 │   └── images/                                 # Screenshots referenced in sub-READMEs
 └── terraform/
@@ -180,7 +200,16 @@ kubectl port-forward svc/prometheus-grafana -n monitoring 3000:80
     ├── outputs.tf
     ├── providers.tf
     ├── versions.tf
-    ├── bootstrap/                              # One-shot module - infra + Helm release in a single apply
+    ├── karpenter.tf                            # Karpenter IAM + EKS Pod Identity association
+    ├── cluster-autoscaler-irsa.tf              # IRSA for Cluster Autoscaler
+    ├── aws-load-balancer-controller-irsa.tf    # IRSA for AWS Load Balancer Controller
+    ├── external-dns-irsa.tf                    # IRSA for ExternalDNS
+    ├── external-secrets-irsa.tf                # IRSA for External Secrets Operator
+    ├── secrets-manager.tf                      # AWS Secrets Manager secrets (ArgoCD, Grafana, Slack)
+    ├── bootstrap/                              # Shell scripts for full GitOps bootstrap / teardown
+    │   ├── bootstrap.sh                        # End-to-end: terraform + ArgoCD Helm + root-app
+    │   └── cleanup.sh                          # Tear down ArgoCD apps and destroy infrastructure
+    ├── app-bootstrap/                          # One-step Terraform module - infra + Helm release
     │   ├── main.tf
     │   ├── backend.tf
     │   ├── variables.tf
@@ -193,7 +222,7 @@ kubectl port-forward svc/prometheus-grafana -n monitoring 3000:80
         │   ├── main.tf
         │   ├── variables.tf
         │   └── outputs.tf
-        └── eks/                                # EKS - managed node group on private subnets
+        └── eks/                                # EKS - managed node group (tainted app=core:NoSchedule)
             ├── main.tf
             ├── variables.tf
             └── outputs.tf
@@ -207,8 +236,8 @@ These are intentional trade-offs for a demo environment:
 
 - **Single NAT gateway** - reduces cost; use one per AZ in production for fault tolerance.
 - **Public EKS API endpoint** - acceptable for demos; restrict `public_access_cidrs` in production.
-- **No ingress controller** - the GitOps path uses `kubectl port-forward`; the bootstrap path exposes the service via an NLB-backed `LoadBalancer` service.
-- **ArgoCD installed manually once** - everything it manages is then fully GitOps-driven.
+- **Core/workload node split** - managed node group nodes are tainted `app=core:NoSchedule` and run system components. Karpenter provisions separate workload nodes (tainted `app=workload:NoSchedule`) for the application. This keeps system stability independent of application scaling.
+- **ArgoCD self-managed via Helm** - bootstrapped once by `bootstrap.sh`, then managed as a GitOps app by itself (`gitops/argocd/argocd.yaml`). The initial Helm install is the only manual step.
 - **Prometheus Operator TLS and webhooks disabled** - simplifies initial bootstrap reliability.
 - **Loki on emptyDir** - logs are ephemeral by design; replace with S3/GCS for any persistent environment.
 - **Network Policy disabled by default** - the chart includes a `NetworkPolicy` resource but it is off by default. Enabling it requires two steps: turning on the VPC CNI Network Policy controller in Terraform, then setting `networkPolicy.enabled: true` in the ArgoCD ApplicationSet. See [gitops/README.md](gitops/README.md#network-policy).
@@ -218,17 +247,11 @@ These are intentional trade-offs for a demo environment:
 ## Cleanup
 
 ```bash
-# 1. Remove ArgoCD-managed apps (prune: true cascades to child resources)
-kubectl delete -f gitops/bootstrap/root-app.yaml
+# GitOps path - the cleanup script removes all ArgoCD apps then destroys infrastructure
+bash terraform/bootstrap/cleanup.sh
 
-# 2. Uninstall ArgoCD
-kubectl delete -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
-kubectl delete namespace argocd
-
-# 3. Destroy infrastructure
-cd terraform && terraform destroy
-# or, if you used bootstrap:
-cd terraform/bootstrap && terraform destroy
+# App-bootstrap path
+cd terraform/app-bootstrap && terraform destroy
 ```
 
 > The S3 state bucket is not removed by `terraform destroy`. Delete it manually when no longer needed:
@@ -249,5 +272,5 @@ cd terraform/bootstrap && terraform destroy
 | `kubectl top pods` - `Metrics API not available` | `metrics-server` is not running. Check `kubectl get pods -n kube-system -l app.kubernetes.io/name=metrics-server`. |
 | HPA shows `<unknown>/70%` | `metrics-server` unavailable or pods have no CPU requests set. Verify `kubectl top pods -n simple-time-service` works first. |
 | HPA not scaling under load | Confirm `hpa.enabled: true` is set in the ApplicationSet override and ArgoCD has synced. Run `kubectl describe hpa simple-time-service -n simple-time-service` for events. |
-| Slack alerts not arriving | Check secret: `kubectl get secret slack-webhook-url -n monitoring`. Check config: `kubectl describe alertmanagerconfig slack -n monitoring`. Confirm the `notify: slack` label is on the alert. |
-| `alertmanager-slack` app degraded in ArgoCD | `slack-webhook-url` secret is missing. Apply it then `argocd app sync alertmanager-slack-simple-eks`. |
+| Slack alerts not arriving | Check ExternalSecret sync: `kubectl get externalsecret -n monitoring`. Check config: `kubectl describe alertmanagerconfig slack -n monitoring`. Confirm the `notify: slack` label is on the alert. |
+| `alertmanager-slack` app degraded in ArgoCD | The Alertmanager webhook ExternalSecret failed to sync. Run `kubectl get externalsecret -n monitoring` and verify the AWS Secrets Manager secret `alertmanager-webhook` exists. |

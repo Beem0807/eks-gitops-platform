@@ -4,7 +4,8 @@ The `gitops/monitoring/` directory deploys the full observability stack via Argo
 
 | File | What it deploys |
 |------|----------------|
-| `prometheus/prometheus.yaml` | `kube-prometheus-stack` - Prometheus, Grafana, Alertmanager, Prometheus Operator |
+| `prometheus/prometheus.yaml` | `kube-prometheus-stack` (v82.18.0) - Prometheus, Grafana, Alertmanager, Prometheus Operator, ALB Ingress for all three UIs |
+| `grafana/grafana-admin-secret.yaml` | ExternalSecret - syncs Grafana admin credentials from AWS Secrets Manager |
 | `grafana/simple-time-service-dashboard.yaml` | Pre-built Grafana dashboard for SimpleTimeService via `charts/raw` |
 
 ---
@@ -13,13 +14,15 @@ The `gitops/monitoring/` directory deploys the full observability stack via Argo
 
 | Component | Details |
 |-----------|---------|
-| Prometheus | Metrics collection, 7-day retention |
-| Grafana | Dashboards UI, auto-provisioned with Prometheus and Loki datasources |
-| Alertmanager | Alert routing and grouping |
+| Prometheus | Metrics collection, 7-day retention, ALB Ingress at `prometheus.platform.<domain>` |
+| Grafana | Dashboards UI, ALB Ingress at `grafana.platform.<domain>`, auto-provisioned datasources |
+| Alertmanager | Alert routing and grouping, ALB Ingress at `alertmanager.platform.<domain>` |
 | Prometheus Operator | Manages `PrometheusRule` and `ServiceMonitor` CRDs |
 | kube-state-metrics | Kubernetes object/state metrics (Deployments, Pods, resource requests) |
 
 All components land in the `monitoring` namespace, created automatically by ArgoCD via `CreateNamespace=true`.
+
+Grafana and Prometheus are on the same ALB Ingress group (`platform-observability`) to minimize the number of load balancers provisioned.
 
 ---
 
@@ -35,24 +38,35 @@ Prometheus Operator TLS and admission webhooks are disabled to simplify bootstra
 
 ## Accessing Grafana
 
+Open `https://grafana.platform.<your-domain>` directly (ALB Ingress via ExternalDNS), or use port-forward if DNS is not yet available:
+
 ```bash
 kubectl port-forward svc/prometheus-grafana -n monitoring 3000:80
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Default username: `admin`. If the password is unknown:
+Open [http://localhost:3000](http://localhost:3000). Username: `admin`. The password is set via the Grafana admin ExternalSecret, which syncs from AWS Secrets Manager (secret name: `grafana-admin`, key: `adminPassword`).
+
+Retrieve it directly from the cluster secret:
 
 ```bash
-kubectl get secret prometheus-grafana -n monitoring \
-  -o jsonpath="{.data.admin-password}" | base64 -d; echo
+kubectl get secret grafana-admin -n monitoring \
+  -o jsonpath="{.data.adminPassword}" | base64 -d; echo
+```
+
+Or from AWS Secrets Manager:
+
+```bash
+aws secretsmanager get-secret-value --secret-id grafana-admin \
+  --query SecretString --output text | jq -r '.adminPassword'
 ```
 
 ## Accessing Prometheus
 
+Open `https://prometheus.platform.<your-domain>` directly (ALB Ingress via ExternalDNS), or use port-forward if DNS is not yet available:
+
 ```bash
 kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 9090:9090
 ```
-
-Open [http://localhost:9090](http://localhost:9090).
 
 ---
 
@@ -85,15 +99,15 @@ Applies only when the service is deployed with `serviceMonitor.enabled=true` and
 kubectl get servicemonitor -n simple-time-service
 
 # 2. Check Prometheus picked it up as a scrape target
-kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 9090:9090
-# Open http://localhost:9090/targets - look for simple-time-service, State: UP
+# Open https://prometheus.platform.<your-domain>/targets
+# or port-forward: kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 9090:9090
+# Look for simple-time-service, State: UP
 
 # 3. Confirm metrics are flowing
 # In Prometheus UI run: http_requests_total
 # Should show time-series with labels handler="/", method="GET"
 
 # 4. Quick end-to-end check
-kubectl port-forward svc/simple-time-service -n simple-time-service 8080:80
-curl http://localhost:8080/
-curl http://localhost:8080/metrics | grep http_requests_total
+curl https://simple-time-service.platform.<your-domain>/
+curl https://simple-time-service.platform.<your-domain>/metrics | grep http_requests_total
 ```

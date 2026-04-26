@@ -103,6 +103,11 @@ All values can be overridden with `--set key=value` or a custom values file (`-f
 | `hpa.scaleUp.periodSeconds` | `30` | Scale-up policy period length in seconds |
 | `pdb.enabled` | `true` | Create a PodDisruptionBudget |
 | `pdb.minAvailable` | `1` | Minimum pods available during disruptions |
+| `ingress.enabled` | `false` | Create an Ingress resource |
+| `ingress.className` | `""` | Ingress class name (e.g. `alb`) |
+| `ingress.annotations` | `{}` | Ingress annotations (e.g. ALB scheme, target type) |
+| `ingress.hosts` | `[]` | List of `{host, paths[]}` entries |
+| `ingress.tls` | `[]` | TLS configuration for the Ingress |
 | `serviceMonitor.enabled` | `false` | Create a Prometheus `ServiceMonitor` (requires Prometheus Operator) |
 | `serviceMonitor.interval` | `30s` | Scrape interval |
 | `serviceMonitor.path` | `/metrics` | Metrics endpoint path |

@@ -11,25 +11,49 @@ Implements the **App of Apps** pattern with ArgoCD. A single root Application bo
 ```
 gitops/
 ├── bootstrap/
-│   └── root-app.yaml                       # Root Application - bootstraps everything below
+│   └── root-app.yaml                           # Root Application - bootstraps everything below
+├── argocd/
+│   ├── argocd.yaml                             # Application - ArgoCD self-managed via Helm
+│   ├── argocd-admin-secret.yaml                # ApplicationSet - ExternalSecret for ArgoCD admin password
+│   └── argocd-ingress.yaml                     # ApplicationSet - ALB Ingress at argocd.platform.<domain>
 ├── app/
-│   └── simple-time-service.yaml            # ApplicationSet - Helm deploy to every registered cluster
-├── metrics-server/
-│   └── metrics-server.yaml                 # ApplicationSet - metrics-server (HPA prerequisite)
+│   └── simple-time-service/
+│       └── simple-time-service.yaml            # ApplicationSet - Helm deploy with ALB Ingress
+├── auto-scaling/
+│   ├── cluster-autoscaler/
+│   │   └── cluster-autoscaler.yaml             # ApplicationSet - Cluster Autoscaler (wave 1)
+│   ├── karpenter/
+│   │   ├── karpenter.yaml                      # ApplicationSet - Karpenter controller (wave 2)
+│   │   └── karpenter-nodepools.yaml            # ApplicationSet - EC2NodeClass + NodePool (wave 3)
+│   └── metrics-server/
+│       └── metrics-server.yaml                 # ApplicationSet - metrics-server (HPA prerequisite)
+├── networking/
+│   ├── ingress-controller/
+│   │   └── aws-load-balancer-controller.yaml   # ApplicationSet - AWS Load Balancer Controller (wave 1)
+│   └── external-dns/
+│       └── external-dns.yaml                   # ApplicationSet - ExternalDNS for Route53 (wave 1)
+├── secrets/
+│   ├── external-secrets/
+│   │   ├── external-secret-operator.yaml       # ApplicationSet - External Secrets Operator (wave 1)
+│   │   └── cluster-secret-store.yaml           # ApplicationSet - ClusterSecretStore (wave 2)
+│   └── reloader/
+│       └── reloader.yaml                       # ApplicationSet - Stakater Reloader (wave 1)
 ├── monitoring/
 │   ├── prometheus/
-│   │   └── prometheus.yaml                 # ApplicationSet - kube-prometheus-stack
+│   │   └── prometheus.yaml                     # ApplicationSet - kube-prometheus-stack (wave 4)
 │   └── grafana/
-│       └── simple-time-service-dashboard.yaml  # ApplicationSet - Grafana dashboard ConfigMap
+│       ├── grafana-admin-secret.yaml           # ApplicationSet - ExternalSecret for Grafana credentials
+│       └── simple-time-service-dashboard.yaml  # ApplicationSet - Grafana dashboard ConfigMap (wave 2)
 ├── alerts/
-│   ├── simple-time-service-alerts.yaml     # ApplicationSet - PrometheusRule (alert expressions)
-│   └── alertmanager-slack.yaml             # ApplicationSet - AlertmanagerConfig (Slack routing)
+│   ├── simple-time-service-alerts.yaml         # ApplicationSet - PrometheusRule (alert expressions)
+│   ├── alertmanager-webhook-secret.yaml        # ApplicationSet - ExternalSecret for Slack webhook
+│   └── alertmanager-slack.yaml                 # ApplicationSet - AlertmanagerConfig (Slack routing)
 └── logs/
     ├── loki/
-    │   ├── loki.yaml                        # ApplicationSet - Loki single-binary log store
-    │   └── grafana-loki-datasource.yaml     # ApplicationSet - Loki datasource ConfigMap for Grafana
+    │   ├── loki.yaml                            # ApplicationSet - Loki single-binary log store (wave 3)
+    │   └── grafana-loki-datasource.yaml         # ApplicationSet - Loki datasource ConfigMap (wave 4)
     └── fluent-bit/
-        └── fluent-bit.yaml                  # ApplicationSet - Fluent Bit DaemonSet (collector → Loki)
+        └── fluent-bit.yaml                      # ApplicationSet - Fluent Bit DaemonSet (wave 4)
 ```
 
 ---
@@ -53,46 +77,37 @@ gitops/
 
 ---
 
-## Installing ArgoCD
+## Installing ArgoCD and bootstrapping
+
+ArgoCD is installed via Helm and self-managed as a GitOps app after initial bootstrap. The full process is handled by `terraform/bootstrap/bootstrap.sh`:
 
 ```bash
-kubectl create namespace argocd
-
-kubectl apply -n argocd \
-  -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
-
-kubectl wait --for=condition=available --timeout=300s \
-  deployment/argocd-server -n argocd
+export TF_VAR_alertmanager_slack_webhook_url="https://hooks.slack.com/..."
+bash terraform/bootstrap/bootstrap.sh
 ```
 
-Retrieve the initial admin password:
+The script installs ArgoCD using the official Helm chart (`argo-cd` v9.4.17) and then applies the root app. ArgoCD takes over and manages its own Helm release from that point on via `gitops/argocd/argocd.yaml`.
+
+Retrieve the admin password (set by the bootstrap script and stored in AWS Secrets Manager):
 
 ```bash
-kubectl -n argocd get secret argocd-initial-admin-secret \
-  -o jsonpath="{.data.password}" | base64 -d; echo
+aws secretsmanager get-secret-value --secret-id argocd-admin \
+  --query SecretString --output text | jq -r '.adminPassword'
 ```
-
----
-
-## Bootstrap
-
-Apply the root app once - this is the only manual step:
-
-```bash
-kubectl apply -f gitops/bootstrap/root-app.yaml
-```
-
-ArgoCD reconciles the `gitops/` directory. Within the default polling interval (up to 3 minutes) it discovers all ApplicationSets and provisions every platform component.
 
 ---
 
 ## Accessing the ArgoCD UI
 
+ArgoCD is exposed via ALB Ingress at `https://argocd.platform.<your-domain>`.
+
+Or use port-forward if DNS is not yet available:
+
 ```bash
-kubectl port-forward svc/argocd-server -n argocd 8080:443
+kubectl port-forward svc/argocd-server -n argocd 8080:80
 ```
 
-Open [https://localhost:8080](https://localhost:8080). Log in with `admin` and the password retrieved above.
+Open [http://localhost:8080](http://localhost:8080).
 
 ---
 
@@ -127,19 +142,46 @@ Any push to `main` affecting `gitops/` or `charts/` is automatically applied wit
 | App | Namespace | Sync wave | Purpose |
 |-----|-----------|-----------|---------|
 | root-app | argocd | — | Discovers all other apps |
-| simple-time-service | simple-time-service | — | SimpleTimeService Helm chart (HPA enabled) |
+| argocd-self | argocd | — | ArgoCD self-managed via Helm |
+| argocd-admin-secret | argocd | 3 | Syncs ArgoCD admin password from Secrets Manager |
+| argocd-ingress | argocd | 2 | ALB Ingress at `argocd.platform.<domain>` |
+| external-secrets | external-secrets | 1 | External Secrets Operator |
+| cluster-secret-store | external-secrets | 2 | ClusterSecretStore pointing to AWS Secrets Manager |
+| reloader | reloader | 1 | Stakater Reloader (watches Secrets/ConfigMaps) |
+| aws-load-balancer-controller | kube-system | 1 | ALB Ingress controller |
+| external-dns | external-dns | 1 | Route53 DNS records from Ingress/Service |
+| cluster-autoscaler | kube-system | 1 | Scales managed node group on pending pods |
+| karpenter | karpenter | 2 | Karpenter controller (workload node provisioner) |
+| karpenter-nodepools | karpenter | 3 | EC2NodeClass + NodePool for `t3a.medium`/`c6a.large` |
 | metrics-server | kube-system | — | CPU/memory metrics for HPA |
-| prometheus | monitoring | — | kube-prometheus-stack |
+| prometheus | monitoring | 4 | kube-prometheus-stack |
+| grafana-admin-secret | monitoring | — | Syncs Grafana admin credentials from Secrets Manager |
 | grafana-dashboard | monitoring | 2 | SimpleTimeService dashboard ConfigMap |
 | simple-time-service-alerts | monitoring | — | PrometheusRule CRD |
+| alertmanager-webhook-secret | monitoring | — | Syncs Slack webhook URL from Secrets Manager |
 | alertmanager-slack | monitoring | — | AlertmanagerConfig CRD |
 | loki | logging | 3 | Loki log store |
 | fluent-bit | logging | 4 | Log collector DaemonSet |
 | grafana-loki-datasource | monitoring | 4 | Loki datasource ConfigMap |
+| simple-time-service | simple-time-service | 4 | SimpleTimeService Helm chart (HPA, ALB Ingress) |
 
 ---
 
-## Autoscaling - HPA and metrics-server
+## Autoscaling
+
+### Node architecture: core vs workload nodes
+
+The managed node group runs system components with the `app=core` node label and `app=core:NoSchedule` taint. All platform workloads (ArgoCD, Prometheus, networking controllers) tolerate this taint and run exclusively on core nodes.
+
+Karpenter provisions a separate pool of workload nodes (labeled `app=workload`, tainted `app=workload:NoSchedule`) for the application. The `simple-time-service` Deployment is configured with `nodeSelector: {app: workload}` and the matching toleration, so it only lands on Karpenter-provisioned nodes.
+
+Workload NodePool: `t3a.medium` or `c6a.large` (on-demand), AMI `al2023`, consolidation enabled (`WhenEmptyOrUnderutilized`, 5m delay), node expiry 30 days.
+
+### Cluster Autoscaler
+
+Scales the core managed node group based on pending pods. Configured with IRSA (`arn:aws:iam::<account>/simple-eks-cluster-autoscaler-irsa`) and auto-discovery via the `k8s.io/cluster-autoscaler/simple-eks` tag.
+
+### HPA and metrics-server
 
 `metrics-server` is a hard prerequisite for HPA - without it the HPA controller cannot read pod utilization and no scaling decisions are made. Two flags are set for EKS compatibility:
 
@@ -148,7 +190,7 @@ Any push to `main` affecting `gitops/` or `charts/` is automatically applied wit
 | `--kubelet-preferred-address-types=InternalIP` | EKS node hostnames are not resolvable inside the cluster |
 | `--kubelet-insecure-tls` | Skips kubelet TLS verification (acceptable for demos) |
 
-The HPA is **disabled by default** in the chart's `values.yaml` and enabled via an override in `gitops/app/simple-time-service.yaml`:
+The HPA is **disabled by default** in the chart's `values.yaml` and enabled via an override in `gitops/app/simple-time-service/simple-time-service.yaml`:
 
 ```yaml
 hpa:
@@ -182,7 +224,7 @@ vpc-cni = {
 
 Then apply: `cd terraform && terraform apply`
 
-**Step 2 - enable the NetworkPolicy resource** in `gitops/app/simple-time-service.yaml`:
+**Step 2 - enable the NetworkPolicy resource** in `gitops/app/simple-time-service/simple-time-service.yaml`:
 
 ```yaml
 helm:
