@@ -94,6 +94,9 @@ spec:
                 alertmanagerConfigMatcherStrategy:
                   type: None
                 webConfigFileSecret: alertmanager-web-config
+                podMetadata:
+                  annotations:
+                    reloader.stakater.com/auto: "true"
                 tolerations:
                   - key: "app"
                     operator: "Equal"
@@ -124,6 +127,9 @@ spec:
                 retention: 7d
                 serviceMonitorSelectorNilUsesHelmValues: false
                 webConfigFileSecret: prometheus-web-config
+                podMetadata:
+                  annotations:
+                    reloader.stakater.com/auto: "true"
                 tolerations:
                   - key: "app"
                     operator: "Equal"
