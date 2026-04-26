@@ -20,6 +20,8 @@ spec:
   template:
     metadata:
       name: 'prometheus-crds-{{.nameNormalized}}'
+      annotations:
+        argocd.argoproj.io/sync-wave: "0"
       labels:
         app.kubernetes.io/part-of: eks-gitops-platform
         app.kubernetes.io/managed-by: argocd
@@ -27,9 +29,11 @@ spec:
     spec:
       project: default
       source:
-        repoURL: https://github.com/prometheus-operator/prometheus-operator
-        targetRevision: v0.86.2
-        path: example/prometheus-operator-crd
+        repoURL: https://prometheus-community.github.io/helm-charts
+        chart: prometheus-operator-crds
+        targetRevision: 28.0.1
+        helm:
+          releaseName: prometheus-crds
       destination:
         server: '{{.server}}'
         namespace: monitoring
