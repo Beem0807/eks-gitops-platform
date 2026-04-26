@@ -5,7 +5,7 @@ module "eks" {
   enable_irsa = true
 
   name               = var.cluster_name
-  kubernetes_version = "1.33"
+  kubernetes_version = "1.34"
 
   endpoint_public_access       = true
 
