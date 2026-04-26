@@ -19,9 +19,6 @@ spec:
         configs:
           params:
             server.insecure: true
-          
-          secret:
-            createSecret: false
 
         server:
           service:
@@ -43,6 +40,14 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
+  
+  ignoreDifferences:
+    - kind: Secret
+      name: argocd-secret
+      namespace: argocd
+      jsonPointers:
+        - /data/admin.password
+        - /data/admin.passwordMtime
 
   syncPolicy:
     automated:
@@ -51,3 +56,4 @@ spec:
       - CreateNamespace=true
       - ServerSideApply=true
       - ClientSideApplyMigration=false
+      - RespectIgnoreDifferences=true
