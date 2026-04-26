@@ -17,6 +17,9 @@ spec:
         selector:
           matchLabels:
             argocd.argoproj.io/secret-type: cluster
+        values:
+          accountId: '{{index .metadata.annotations "aws-account-id"}}'
+          clusterName: '{{index .metadata.annotations "cluster-name"}}'
   template:
     metadata:
       name: 'thanos-{{.nameNormalized}}'
