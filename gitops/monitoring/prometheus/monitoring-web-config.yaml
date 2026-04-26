@@ -17,6 +17,7 @@ spec:
         selector:
           matchLabels:
             argocd.argoproj.io/secret-type: cluster
+
   template:
     metadata:
       name: 'monitoring-web-config-{{.nameNormalized}}'
@@ -24,8 +25,10 @@ spec:
         app.kubernetes.io/part-of: eks-gitops-platform
         app.kubernetes.io/managed-by: argocd
         app.kubernetes.io/component: secrets
+
     spec:
       project: default
+
       source:
         repoURL: https://github.com/Beem0807/eks-gitops-platform.git
         targetRevision: main
@@ -47,20 +50,29 @@ spec:
                   target:
                     name: prometheus-web-config
                     creationPolicy: Owner
+                    deletionPolicy: Retain
                     template:
+                      engineVersion: v2
                       data:
                         web-config.yaml: |
                           basic_auth_users:
-                            {{"{{"}} .adminUser {{"}}"}}: "{{"{{"}} .adminPasswordBcrypt {{"}}"}}"
+                            {{ "{{" }} .adminUser {{ "}}" }}: "{{ "{{" }} .adminPasswordBcrypt {{ "}}" }}"
                   data:
                     - secretKey: adminUser
                       remoteRef:
                         key: grafana-admin
                         property: adminUser
+                        conversionStrategy: Default
+                        decodingStrategy: None
+                        metadataPolicy: None
+
                     - secretKey: adminPasswordBcrypt
                       remoteRef:
                         key: grafana-admin
                         property: adminPasswordBcrypt
+                        conversionStrategy: Default
+                        decodingStrategy: None
+                        metadataPolicy: None
 
               - apiVersion: external-secrets.io/v1beta1
                 kind: ExternalSecret
@@ -75,23 +87,34 @@ spec:
                   target:
                     name: alertmanager-web-config
                     creationPolicy: Owner
+                    deletionPolicy: Retain
                     template:
+                      engineVersion: v2
                       data:
                         web-config.yaml: |
                           basic_auth_users:
-                            {{"{{"}} .adminUser {{"}}"}}: "{{"{{"}} .adminPasswordBcrypt {{"}}"}}"
+                            {{ "{{" }} .adminUser {{ "}}" }}: "{{ "{{" }} .adminPasswordBcrypt {{ "}}" }}"
                   data:
                     - secretKey: adminUser
                       remoteRef:
                         key: grafana-admin
                         property: adminUser
+                        conversionStrategy: Default
+                        decodingStrategy: None
+                        metadataPolicy: None
+
                     - secretKey: adminPasswordBcrypt
                       remoteRef:
                         key: grafana-admin
                         property: adminPasswordBcrypt
+                        conversionStrategy: Default
+                        decodingStrategy: None
+                        metadataPolicy: None
+
       destination:
         server: '{{.server}}'
         namespace: monitoring
+
       syncPolicy:
         automated:
           prune: true

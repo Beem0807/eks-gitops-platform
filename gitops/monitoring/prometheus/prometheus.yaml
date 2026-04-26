@@ -39,6 +39,7 @@ spec:
               enabled: true
               annotations:
                 reloader.stakater.com/auto: "true"
+                secret.reloader.stakater.com/reload: "grafana-admin"
               admin:
                 existingSecret: grafana-admin
                 userKey: admin-user
@@ -93,10 +94,11 @@ spec:
                 alertmanagerConfigNamespaceSelector: {}
                 alertmanagerConfigMatcherStrategy:
                   type: None
-                webConfigFileSecret: alertmanager-web-config
-                podMetadata:
-                  annotations:
-                    reloader.stakater.com/auto: "true"
+                secrets:
+                  - alertmanager-web-config
+                additionalArgs:
+                  - name: web.config.file
+                    value: /etc/alertmanager/secrets/alertmanager-web-config/web-config.yaml
                 tolerations:
                   - key: "app"
                     operator: "Equal"
@@ -125,11 +127,11 @@ spec:
                       - prometheus.platform.{{ .values.domainName }}
               prometheusSpec:
                 retention: 7d
-                serviceMonitorSelectorNilUsesHelmValues: false
-                webConfigFileSecret: prometheus-web-config
-                podMetadata:
-                  annotations:
-                    reloader.stakater.com/auto: "true"
+                secrets:
+                  - prometheus-web-config
+                additionalArgs:
+                  - name: web.config.file
+                    value: /etc/prometheus/secrets/prometheus-web-config/web-config.yaml
                 tolerations:
                   - key: "app"
                     operator: "Equal"
