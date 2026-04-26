@@ -107,6 +107,12 @@ variable "grafana_admin_password" {
   sensitive   = true
 }
 
+variable "grafana_admin_password_bcrypt" {
+  description = "Bcrypt hash of Grafana admin password - used for Prometheus and Alertmanager basic auth web config"
+  type        = string
+  sensitive   = true
+}
+
 variable "alertmanager_slack_webhook_url" {
   description = "Slack webhook URL for Alertmanager"
   type        = string

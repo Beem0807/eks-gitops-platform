@@ -133,6 +133,12 @@ else
   GRAFANA_ADMIN_PASSWORD_PRINTABLE="$GRAFANA_ADMIN_PASSWORD"
 fi
 
+if [[ -z "${TF_VAR_grafana_admin_password_bcrypt:-}" ]]; then
+  TF_VAR_grafana_admin_password_bcrypt="$(htpasswd -bnBC 10 "" "$TF_VAR_grafana_admin_password" | tr -d ':\n')"
+  export TF_VAR_grafana_admin_password_bcrypt
+  echo "Generated bcrypt hash for Prometheus/Alertmanager web config."
+fi
+
 echo "Running Terraform..."
 cd "$TF_DIR"
 terraform init

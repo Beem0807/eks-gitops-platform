@@ -93,6 +93,7 @@ spec:
                 alertmanagerConfigNamespaceSelector: {}
                 alertmanagerConfigMatcherStrategy:
                   type: None
+                webConfigFileSecret: alertmanager-web-config
                 tolerations:
                   - key: "app"
                     operator: "Equal"
@@ -122,6 +123,7 @@ spec:
               prometheusSpec:
                 retention: 7d
                 serviceMonitorSelectorNilUsesHelmValues: false
+                webConfigFileSecret: prometheus-web-config
                 tolerations:
                   - key: "app"
                     operator: "Equal"

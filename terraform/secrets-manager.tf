@@ -42,8 +42,9 @@ resource "aws_secretsmanager_secret_version" "grafana_admin" {
   secret_id = aws_secretsmanager_secret.grafana_admin.id
 
   secret_string = jsonencode({
-    adminUser     = var.grafana_admin_user
-    adminPassword = var.grafana_admin_password
+    adminUser            = var.grafana_admin_user
+    adminPassword        = var.grafana_admin_password
+    adminPasswordBcrypt  = var.grafana_admin_password_bcrypt
   })
 }
 
