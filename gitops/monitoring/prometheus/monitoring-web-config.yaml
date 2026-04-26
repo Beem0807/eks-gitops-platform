@@ -51,7 +51,7 @@ spec:
                       data:
                         web-config.yaml: |
                           basic_auth_users:
-                            {{ .adminUser }}: "{{ .adminPasswordBcrypt }}"
+                            {{"{{"}} .adminUser {{"}}"}}: "{{"{{"}} .adminPasswordBcrypt {{"}}"}}"
                   data:
                     - secretKey: adminUser
                       remoteRef:
@@ -79,7 +79,7 @@ spec:
                       data:
                         web-config.yaml: |
                           basic_auth_users:
-                            {{ .adminUser }}: "{{ .adminPasswordBcrypt }}"
+                            {{"{{"}} .adminUser {{"}}"}}: "{{"{{"}} .adminPasswordBcrypt {{"}}"}}"
                   data:
                     - secretKey: adminUser
                       remoteRef:
