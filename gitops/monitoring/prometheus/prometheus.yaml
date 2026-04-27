@@ -116,6 +116,9 @@ spec:
               prometheusSpec:
                 serviceMonitorSelectorNilUsesHelmValues: false
                 retention: 7d
+                externalLabels:
+                  cluster: '{{ .values.clusterName }}'
+                  replica: prometheus
                 tolerations:
                   - key: "app"
                     operator: "Equal"

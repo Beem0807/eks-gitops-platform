@@ -50,6 +50,11 @@ spec:
               enabled: false
 
             query:
+              replicaCount: 1
+              dnsDiscovery:
+                enabled: true
+                sidecarsService: prometheus-kube-prometheus-thanos-discovery
+                sidecarsNamespace: monitoring
               nodeSelector:
                 app: core
               tolerations:
