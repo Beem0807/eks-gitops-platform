@@ -92,6 +92,7 @@ variable "argocd_admin_password_plaintext" {
 variable "argocd_admin_password_hash" {
   description = "Bcrypt hash of Argo CD admin password"
   type        = string
+  default     = ""
   sensitive   = true
 }
 
@@ -104,12 +105,14 @@ variable "grafana_admin_user" {
 variable "grafana_admin_password" {
   description = "Grafana admin password"
   type        = string
+  default     = ""
   sensitive   = true
 }
 
 variable "alertmanager_slack_webhook_url" {
   description = "Slack webhook URL for Alertmanager"
   type        = string
+  default     = ""
   sensitive   = true
 }
 
