@@ -40,7 +40,12 @@ gitops/
 │       └── reloader.yaml                       # ApplicationSet - Stakater Reloader (wave 1)
 ├── monitoring/
 │   ├── prometheus/
-│   │   └── prometheus.yaml                     # ApplicationSet - kube-prometheus-stack (wave 4)
+│   │   ├── prometheus-crds.yaml                # ApplicationSet - Prometheus Operator CRDs (wave 0)
+│   │   ├── prometheus.yaml                     # ApplicationSet - kube-prometheus-stack (wave 4)
+│   │   └── prometheus-adapter.yaml             # ApplicationSet - custom metrics API bridge (wave 5)
+│   ├── thanos/
+│   │   ├── thanos-objstore-secret.yaml         # ApplicationSet - S3 objstore Secret (wave 3)
+│   │   └── thanos.yaml                         # ApplicationSet - Thanos query/compactor/storegateway (wave 6)
 │   └── grafana/
 │       ├── grafana-admin-secret.yaml           # ApplicationSet - ExternalSecret for Grafana credentials
 │       └── simple-time-service-dashboard.yaml  # ApplicationSet - Grafana dashboard ConfigMap (wave 2)
@@ -62,7 +67,10 @@ gitops/
 
 | | |
 |-|-|
-| [monitoring/README.md](monitoring/README.md) | Prometheus, Grafana dashboard, ServiceMonitor verification |
+| [auto-scaling/README.md](auto-scaling/README.md) | Cluster Autoscaler, Karpenter, NodePool config, metrics-server, HPA |
+| [networking/README.md](networking/README.md) | AWS Load Balancer Controller, ExternalDNS, Ingress annotations |
+| [secrets/README.md](secrets/README.md) | External Secrets Operator, ClusterSecretStore, ExternalSecret mappings, Reloader |
+| [monitoring/README.md](monitoring/README.md) | Prometheus, Grafana, Thanos, Prometheus Adapter, ServiceMonitor |
 | [alerts/README.md](alerts/README.md) | PrometheusRules, Slack setup, testing, silencing, grouping |
 | [logs/README.md](logs/README.md) | Loki, Fluent Bit, Grafana datasource, LogQL queries |
 
@@ -79,11 +87,11 @@ gitops/
 
 ## Installing ArgoCD and bootstrapping
 
-ArgoCD is installed via Helm and self-managed as a GitOps app after initial bootstrap. The full process is handled by `terraform/bootstrap/bootstrap.sh`:
+ArgoCD is installed via Helm and self-managed as a GitOps app after initial bootstrap. The full process is handled by `terraform/scripts/bootstrap.sh`:
 
 ```bash
 export TF_VAR_alertmanager_slack_webhook_url="https://hooks.slack.com/..."
-bash terraform/bootstrap/bootstrap.sh
+bash terraform/scripts/bootstrap.sh
 ```
 
 The script installs ArgoCD using the official Helm chart (`argo-cd` v9.4.17) and then applies the root app. ArgoCD takes over and manages its own Helm release from that point on via `gitops/argocd/argocd.yaml`.
@@ -154,7 +162,11 @@ Any push to `main` affecting `gitops/` or `charts/` is automatically applied wit
 | karpenter | karpenter | 2 | Karpenter controller (workload node provisioner) |
 | karpenter-nodepools | karpenter | 3 | EC2NodeClass + NodePool for `t3a.medium`/`c6a.large` |
 | metrics-server | kube-system | — | CPU/memory metrics for HPA |
+| prometheus-crds | monitoring | 0 | Prometheus Operator CRDs (pre-installed before stack) |
 | prometheus | monitoring | 4 | kube-prometheus-stack |
+| prometheus-adapter | monitoring | 5 | Custom metrics API bridge (enables custom-metric HPA) |
+| thanos-objstore-secret | monitoring | 3 | S3 objstore Secret injected from cluster annotations |
+| thanos | monitoring | 6 | Thanos Query, Compactor, StoreGateway |
 | grafana-admin-secret | monitoring | — | Syncs Grafana admin credentials from Secrets Manager |
 | grafana-dashboard | monitoring | 2 | SimpleTimeService dashboard ConfigMap |
 | simple-time-service-alerts | monitoring | — | PrometheusRule CRD |

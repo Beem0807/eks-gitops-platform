@@ -28,7 +28,7 @@ To provision it, set the webhook URL before running the bootstrap script:
 
 ```bash
 export TF_VAR_alertmanager_slack_webhook_url="https://hooks.slack.com/services/..."
-bash terraform/bootstrap/bootstrap.sh
+bash terraform/scripts/bootstrap.sh
 ```
 
 If the cluster is already running and you need to update the webhook URL:

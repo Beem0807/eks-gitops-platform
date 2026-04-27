@@ -1,6 +1,6 @@
 # Terraform - AWS VPC and EKS Cluster
 
-This directory provisions the AWS infrastructure: a VPC and an EKS cluster. The `bootstrap/` subdirectory is an alternative module that provisions the full stack (infrastructure + app) in a single apply.
+This directory provisions the AWS infrastructure: a VPC and an EKS cluster. The `app-bootstrap/` subdirectory is an alternative module that provisions the full stack (infrastructure + app) in a single apply. Lifecycle scripts (bootstrap, upgrade, cleanup) live in `scripts/`.
 
 ---
 
@@ -26,7 +26,8 @@ This directory provisions the AWS infrastructure: a VPC and an EKS cluster. The 
 | Node security group | NLB NodePort rule optional (`enable_nlb_nodeport_rule`); Karpenter discovery tag when `enable_karpenter_discovery_tags=true` |
 | EKS add-ons | `coredns`, `kube-proxy`, `vpc-cni`, `eks-pod-identity-agent` managed by the EKS module |
 | Karpenter | IAM controller role + EKS Pod Identity association + node IAM role + instance profile + SQS interruption queue |
-| IRSA roles | Cluster Autoscaler, AWS Load Balancer Controller, ExternalDNS, External Secrets Operator |
+| IRSA roles | Cluster Autoscaler, AWS Load Balancer Controller, ExternalDNS, External Secrets Operator, Thanos Prometheus sidecar, Thanos Compactor + StoreGateway |
+| Thanos S3 bucket | `<cluster-name>-thanos-metrics-<account-id>-<region>` — versioned, AES256-encrypted, public access blocked |
 | Secrets Manager | `argocd-admin`, `grafana-admin`, `alertmanager-webhook` secrets provisioned by Terraform |
 
 Modules used: [`terraform-aws-modules/eks/aws`](https://registry.terraform.io/modules/terraform-aws-modules/eks/aws/latest), [`terraform-aws-modules/vpc/aws`](https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws/latest), and [`terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts`](https://registry.terraform.io/modules/terraform-aws-modules/iam/aws/latest).
@@ -178,9 +179,13 @@ Confirm with `yes`. This removes all AWS resources created by Terraform.
 
 ---
 
-## Full GitOps bootstrap script
+## Lifecycle scripts
 
-`terraform/bootstrap/bootstrap.sh` is the recommended end-to-end bootstrap path. It:
+All scripts live in `terraform/scripts/` and require `terraform`, `aws`, `kubectl`, `openssl`, `git`, and `htpasswd` (`brew install httpd` on macOS).
+
+### bootstrap.sh — full cluster bring-up
+
+`terraform/scripts/bootstrap.sh` is the recommended end-to-end bootstrap path. It:
 
 1. Runs `terraform apply` in `terraform/` to provision infrastructure and secrets
 2. Runs `aws eks update-kubeconfig`
@@ -197,10 +202,21 @@ export TF_VAR_alertmanager_slack_webhook_url="https://hooks.slack.com/..."
 # export TF_VAR_grafana_admin_password="<password>"
 # export TF_VAR_argocd_admin_password_hash="<bcrypt-hash>"  # skip htpasswd generation
 
-bash terraform/bootstrap/bootstrap.sh
+bash terraform/scripts/bootstrap.sh
 ```
 
-`terraform/bootstrap/cleanup.sh` tears everything down in reverse order.
+### upgrade.sh — re-apply Terraform on a running cluster
+
+Use `upgrade.sh` when you need to apply Terraform changes or rotate secrets without reinstalling ArgoCD. It re-runs Terraform, refreshes the ArgoCD cluster secret with the latest outputs (including the Thanos bucket name), and force-annotates all three ExternalSecrets to trigger an immediate re-sync.
+
+```bash
+export TF_VAR_alertmanager_slack_webhook_url="https://hooks.slack.com/..."
+bash terraform/scripts/upgrade.sh
+```
+
+### cleanup.sh — tear everything down
+
+`terraform/scripts/cleanup.sh` removes all ArgoCD apps then destroys the full infrastructure.
 
 ---
 
