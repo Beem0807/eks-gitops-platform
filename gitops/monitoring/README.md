@@ -5,7 +5,7 @@ The `gitops/monitoring/` directory deploys the full observability stack via Argo
 | File | What it deploys |
 |------|----------------|
 | `prometheus/prometheus-crds.yaml` | Prometheus Operator CRDs only (sync-wave 0) - managed separately to allow safe CRD upgrades |
-| `prometheus/prometheus.yaml` | `kube-prometheus-stack` (v82.18.0) - Prometheus, Grafana, Alertmanager, Prometheus Operator, ALB Ingress for all three UIs (sync-wave 4) |
+| `prometheus/prometheus.yaml` | `kube-prometheus-stack` (v82.18.0) - Prometheus, Grafana, Alertmanager, Prometheus Operator, ALB Ingress for Grafana only (sync-wave 4) |
 | `prometheus/prometheus-adapter.yaml` | Prometheus Adapter - exposes Prometheus metrics via the Kubernetes custom metrics API (sync-wave 5) |
 | `thanos/thanos-objstore-secret.yaml` | `thanos-objstore-config` Secret - S3 bucket name and region injected from the ArgoCD cluster secret annotations (sync-wave 3) |
 | `thanos/thanos.yaml` | Thanos - Query, Compactor, StoreGateway (sync-wave 6) |
@@ -18,9 +18,9 @@ The `gitops/monitoring/` directory deploys the full observability stack via Argo
 
 | Component | Details |
 |-----------|---------|
-| Prometheus | Metrics collection, 7-day local retention, Thanos sidecar ships blocks to S3, ALB Ingress at `prometheus.platform.<domain>` (basic auth) |
+| Prometheus | Metrics collection, 7-day local retention, Thanos sidecar ships blocks to S3, no ingress - access via `kubectl port-forward` |
 | Grafana | Dashboards UI, ALB Ingress at `grafana.platform.<domain>`, auto-provisioned datasources |
-| Alertmanager | Alert routing and grouping, ALB Ingress at `alertmanager.platform.<domain>` (basic auth) |
+| Alertmanager | Alert routing and grouping, no ingress - access via `kubectl port-forward` |
 | Prometheus Operator | Manages `PrometheusRule` and `ServiceMonitor` CRDs |
 | Prometheus Adapter | Custom metrics API (`/apis/custom.metrics.k8s.io`) - enables HPA on arbitrary Prometheus queries |
 | Thanos Query | Unified query endpoint across Prometheus and S3-backed historical data |
@@ -30,7 +30,7 @@ The `gitops/monitoring/` directory deploys the full observability stack via Argo
 
 All components land in the `monitoring` namespace, created automatically by ArgoCD via `CreateNamespace=true`.
 
-Grafana, Prometheus, and Alertmanager share the same ALB Ingress group (`platform-observability`) to minimize load balancers provisioned.
+Grafana shares the `platform-observability` ALB Ingress group with ArgoCD and SimpleTimeService. Prometheus and Alertmanager have no ingress and are not publicly exposed.
 
 ---
 
@@ -70,30 +70,23 @@ aws secretsmanager get-secret-value --secret-id grafana-admin \
 
 ## Accessing Prometheus
 
-Prometheus is protected with **basic auth**. The credentials are stored in AWS Secrets Manager (secret name: `prometheus-basic-auth`) and synced via ExternalSecrets.
-
-Open `https://prometheus.platform.<your-domain>` directly, or use port-forward:
+Prometheus has no ingress. Access it via port-forward:
 
 ```bash
 kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 9090:9090
 ```
 
-Retrieve the password:
-
-```bash
-aws secretsmanager get-secret-value --secret-id prometheus-basic-auth \
-  --query SecretString --output text | jq -r '.password'
-```
+Open [http://localhost:9090](http://localhost:9090).
 
 ## Accessing Alertmanager
 
-Alertmanager is also protected with **basic auth** (same credentials as Prometheus).
-
-Open `https://alertmanager.platform.<your-domain>` directly, or use port-forward:
+Alertmanager has no ingress. Access it via port-forward:
 
 ```bash
 kubectl port-forward svc/prometheus-kube-prometheus-alertmanager -n monitoring 9093:9093
 ```
+
+Open [http://localhost:9093](http://localhost:9093).
 
 ---
 
@@ -182,9 +175,8 @@ Applies only when the service is deployed with `serviceMonitor.enabled=true` and
 kubectl get servicemonitor -n simple-time-service
 
 # 2. Check Prometheus picked it up as a scrape target
-# Open https://prometheus.platform.<your-domain>/targets
-# or port-forward: kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 9090:9090
-# Look for simple-time-service, State: UP
+# kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 9090:9090
+# Open http://localhost:9090/targets - look for simple-time-service, State: UP
 
 # 3. Confirm metrics are flowing
 # In Prometheus UI run: http_requests_total

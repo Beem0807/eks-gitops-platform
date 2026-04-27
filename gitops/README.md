@@ -167,11 +167,11 @@ Any push to `main` affecting `gitops/` or `charts/` is automatically applied wit
 | prometheus-adapter | monitoring | 5 | Custom metrics API bridge (enables custom-metric HPA) |
 | thanos-objstore-secret | monitoring | 3 | S3 objstore Secret injected from cluster annotations |
 | thanos | monitoring | 6 | Thanos Query, Compactor, StoreGateway |
-| grafana-admin-secret | monitoring | — | Syncs Grafana admin credentials from Secrets Manager |
+| grafana-admin-secret | monitoring | 3 | Syncs Grafana admin credentials from Secrets Manager |
 | grafana-dashboard | monitoring | 2 | SimpleTimeService dashboard ConfigMap |
-| simple-time-service-alerts | monitoring | — | PrometheusRule CRD |
-| alertmanager-webhook-secret | monitoring | — | Syncs Slack webhook URL from Secrets Manager |
-| alertmanager-slack | monitoring | — | AlertmanagerConfig CRD |
+| simple-time-service-alerts | monitoring | 5 | PrometheusRule CRD |
+| alertmanager-webhook-secret | monitoring | 3 | Syncs Slack webhook URL from Secrets Manager |
+| alertmanager-slack | monitoring | 4 | AlertmanagerConfig CRD |
 | loki | logging | 3 | Loki log store |
 | fluent-bit | logging | 4 | Log collector DaemonSet |
 | grafana-loki-datasource | monitoring | 4 | Loki datasource ConfigMap |

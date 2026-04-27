@@ -56,7 +56,7 @@ kubectl get externalsecret -n monitoring
 
 Verify the full Alertmanager → Slack path without touching any cluster resources.
 
-Alertmanager is accessible at `https://alertmanager.platform.<your-domain>`, or use port-forward:
+Alertmanager has no ingress. Access it via port-forward:
 
 ```bash
 kubectl port-forward svc/prometheus-kube-prometheus-alertmanager -n monitoring 9093:9093
@@ -84,8 +84,6 @@ The alert appears in `#alerts-test` within 30 seconds and auto-resolves after 5 
 ## Silencing alerts
 
 **Via the Alertmanager UI:**
-
-Open `https://alertmanager.platform.<your-domain>` → **Silences** → **New Silence**. Or use port-forward:
 
 ```bash
 kubectl port-forward svc/prometheus-kube-prometheus-alertmanager -n monitoring 9093:9093

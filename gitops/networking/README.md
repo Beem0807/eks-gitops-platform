@@ -57,7 +57,7 @@ ExternalDNS
 https://<service>.platform.<domain>  →  ALB  →  pod
 ```
 
-Every service and the ArgoCD UI are exposed this way. The platform shares a single ALB per Ingress group (`platform-observability` for Prometheus/Grafana/Alertmanager, a separate ALB for ArgoCD and the application) to reduce AWS load balancer costs.
+Every service and the ArgoCD UI are exposed this way. Each service with an ingress gets its own ALB: one for Grafana (group `platform-observability`), one for ArgoCD, and one for SimpleTimeService. Prometheus and Alertmanager have no ingress. The `platform-observability` group name on Grafana's ingress means any future service that adds `group.name: platform-observability` will share that ALB automatically.
 
 ---
 
@@ -90,7 +90,7 @@ kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controll
 | `alb.ingress.kubernetes.io/target-type` | `ip` | Route directly to pod IPs (requires VPC CNI) |
 | `alb.ingress.kubernetes.io/listen-ports` | `[{"HTTP":80},{"HTTPS":443}]` | Serve both ports |
 | `alb.ingress.kubernetes.io/ssl-redirect` | `443` | Redirect HTTP → HTTPS |
-| `alb.ingress.kubernetes.io/group.name` | `platform-observability` | Share one ALB across multiple Ingress resources |
+| `alb.ingress.kubernetes.io/group.name` | e.g. `platform-observability` | Share one ALB across multiple Ingress resources. Currently only used by Grafana; ArgoCD and SimpleTimeService each get their own ALB. |
 
 ---
 

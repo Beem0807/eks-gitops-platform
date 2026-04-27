@@ -13,7 +13,7 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 | **Karpenter** | Provisions workload nodes on-demand (`t3a.medium` / `c6a.large`) |
 | **External Secrets Operator** | Syncs AWS Secrets Manager secrets into Kubernetes Secrets |
 | **Reloader** | Rolls Deployments automatically when referenced Secrets or ConfigMaps change |
-| **Prometheus + Grafana** | Metrics collection, pre-built dashboard, Slack alerting (basic auth on Prometheus and Alertmanager UIs) |
+| **Prometheus + Grafana** | Metrics collection, pre-built dashboard, Slack alerting. Grafana is publicly accessible via ALB ingress; Prometheus and Alertmanager have no ingress and are accessible via `kubectl port-forward` only. |
 | **Prometheus CRDs** | Prometheus Operator CRDs managed as a separate ArgoCD app (sync-wave 0) to allow safe CRD upgrades |
 | **Prometheus Adapter** | Exposes Prometheus metrics via the Kubernetes custom metrics API, enabling custom-metric HPA |
 | **Thanos** | Long-term metric storage - Prometheus sidecar ships data to S3; Query, Compactor, and StoreGateway provide durable retention |
@@ -59,7 +59,7 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 
 ### ACM certificate (required before bootstrap)
 
-The ALB Ingress for every service (ArgoCD, Grafana, Prometheus, Alertmanager, SimpleTimeService) uses HTTPS with HTTP → HTTPS redirect. The ALB listener looks up a certificate by domain match, so an ACM certificate covering your domain **must exist and be validated** before running `bootstrap.sh`.
+The ALB Ingress for ArgoCD, Grafana, and SimpleTimeService uses HTTPS with HTTP → HTTPS redirect. Prometheus and Alertmanager have no ingress — they are accessed via `kubectl port-forward`. The ALB listener looks up a certificate by domain match, so an ACM certificate covering your domain **must exist and be validated** before running `bootstrap.sh`.
 
 A wildcard certificate is the simplest option - one cert covers all subdomains:
 
@@ -118,12 +118,12 @@ export TF_VAR_alertmanager_slack_webhook_url="https://hooks.slack.com/..."
 # 2. Run the bootstrap script - provisions infra, installs ArgoCD via Helm, applies root app
 bash terraform/scripts/bootstrap.sh
 
-# The script prints all credentials at completion. All UIs are accessible via HTTPS:
+# The script prints all credentials at completion.
 # ArgoCD:       https://argocd.platform.<your-domain>
 # Service:      https://simple-time-service.platform.<your-domain>
 # Grafana:      https://grafana.platform.<your-domain>
-# Prometheus:   https://prometheus.platform.<your-domain>
-# Alertmanager: https://alertmanager.platform.<your-domain>
+# Prometheus:   kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 9090:9090
+# Alertmanager: kubectl port-forward svc/prometheus-kube-prometheus-alertmanager -n monitoring 9093:9093
 
 # 3. Watch ArgoCD reconcile (optional, takes up to 3 minutes for first sync)
 kubectl get applications -n argocd -w
@@ -169,7 +169,7 @@ bash terraform/scripts/upgrade.sh
 | 1 | Cluster is up | `kubectl get nodes` - all `Ready` |
 | 2 | ArgoCD synced *(GitOps path)* | `argocd app get root-app` - `Synced / Healthy` |
 | 3 | Service responds | **Bootstrap:** `curl http://$(terraform -chdir=terraform/app-bootstrap output -raw application_url)/` **GitOps:** `curl https://simple-time-service.platform.<your-domain>/` - returns `timestamp` + `ip` JSON |
-| 4 | Prometheus scraping | Open `https://prometheus.platform.<your-domain>/targets` - `simple-time-service` shows `UP` |
+| 4 | Prometheus scraping | `kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 9090:9090` → open `http://localhost:9090/targets` - `simple-time-service` shows `UP` |
 | 5 | Grafana dashboard live | Open `https://grafana.platform.<your-domain>` - SimpleTimeService dashboard has data |
 | 6 | HPA reacts to load | `kubectl get hpa -n simple-time-service -w` while running `python3 scripts/load_test.py` |
 | 7 | Slack alert fires | Fire test alert (see [gitops/alerts/README.md](gitops/alerts/README.md#testing-the-slack-receiver)) - appears in `#alerts-test` within 30s |
@@ -311,20 +311,27 @@ bash terraform/scripts/upgrade.sh
 
 ## Design notes
 
-These are intentional trade-offs for a demo environment:
+### Architectural decisions
 
-- **Single NAT gateway** - reduces cost; use one per AZ in production for fault tolerance.
-- **Public EKS API endpoint** - acceptable for demos; restrict `public_access_cidrs` in production.
-- **EKS 1.34** - cluster runs Kubernetes 1.34.
-- **Core/workload node split** - managed node group nodes are tainted `app=core:NoSchedule` and run system components. Karpenter provisions separate workload nodes (tainted `app=workload:NoSchedule`) for the application. This keeps system stability independent of application scaling.
-- **ArgoCD self-managed via Helm** - bootstrapped once by `bootstrap.sh`, then managed as a GitOps app by itself (`gitops/argocd/argocd.yaml`). The initial Helm install is the only manual step.
-- **Prometheus Operator TLS and webhooks disabled** - simplifies initial bootstrap reliability.
-- **Prometheus CRDs managed separately** - `prometheus-crds.yaml` installs CRDs at sync-wave 0 before `kube-prometheus-stack`, allowing CRD upgrades without touching the operator release.
-- **Prometheus and Alertmanager basic auth** - both UIs are protected with bcrypt-hashed credentials provisioned during bootstrap. The hash is stored in Secrets Manager and synced via ExternalSecrets.
+These are production-grade patterns used throughout the platform, documented here to explain the reasoning.
+
+- **Core/workload node split** - managed node group nodes are tainted `app=core:NoSchedule` and run system components. Karpenter provisions separate workload nodes (tainted `app=workload:NoSchedule`) for the application. This keeps system stability independent of application scaling — a misbehaving workload cannot starve the control plane components.
+- **ArgoCD self-managed via Helm** - bootstrapped once by `bootstrap.sh`, then manages its own upgrades and config through Git (`gitops/argocd/argocd.yaml`). All ArgoCD changes are auditable and reversible via the same GitOps workflow as everything else. The initial `helm install` is unavoidable (you need the engine running before it can manage itself), but it is the only manual step.
+- **Prometheus CRDs managed separately** - `prometheus-crds.yaml` installs CRDs at sync-wave 0 before `kube-prometheus-stack`. This decouples CRD lifecycle from the operator release, allowing CRD upgrades without touching the operator and avoiding the Helm CRD upgrade limitation.
 - **Thanos long-term retention** - Prometheus ships blocks to an S3 bucket via the Thanos sidecar. Compactor enforces retention (30d raw / 90d 5m / 180d 1h). StoreGateway serves historical queries. Query runs alongside Prometheus for a unified query endpoint.
 - **Prometheus Adapter** - bridges Prometheus metrics into the Kubernetes custom metrics API. Enables HPA rules that scale on arbitrary Prometheus queries rather than just CPU/memory.
-- **Loki on emptyDir** - logs are ephemeral by design; replace with S3/GCS for any persistent environment.
-- **Network Policy disabled by default** - the chart includes a `NetworkPolicy` resource but it is off by default. Enabling it requires two steps: turning on the VPC CNI Network Policy controller in Terraform, then setting `networkPolicy.enabled: true` in the ArgoCD ApplicationSet. See [gitops/README.md](gitops/README.md#network-policy).
+
+### Demo trade-offs
+
+These are intentional shortcuts for a demo environment, with the production-ready alternative noted.
+
+- **Single NAT gateway** - reduces cost; use one per AZ in production for fault tolerance.
+- **Public EKS API endpoint** - acceptable for demos; restrict `public_access_cidrs` and consider enabling a private endpoint with VPN/bastion access in production. Enable control plane audit logging for any environment with real workloads.
+- **EKS 1.34** - cluster runs Kubernetes 1.34. Pin to the latest supported version and track the EKS support window (~14 months per minor version) before going to production.
+- **Prometheus Operator TLS and webhooks disabled** - simplifies initial bootstrap reliability; re-enable for production deployments.
+- **Prometheus and Alertmanager no ingress** - neither UI is exposed publicly; access is via `kubectl port-forward` only. This avoids the need for auth on those endpoints in the demo. For production, expose them behind OIDC/OAuth2 (e.g. oauth2-proxy) rather than open ALB ingress.
+- **Loki on emptyDir** - logs are ephemeral; a Loki pod restart drops all stored log data. Replace with an S3/GCS backend for any environment where logs need to survive pod restarts.
+- **Network Policy disabled by default** - the chart includes a `NetworkPolicy` resource but it is off by default, meaning there is no east-west traffic isolation between namespaces. Enabling it requires two steps: turning on the VPC CNI Network Policy controller in Terraform, then setting `networkPolicy.enabled: true` in the ArgoCD ApplicationSet. See [gitops/README.md](gitops/README.md#network-policy).
 
 ---
 

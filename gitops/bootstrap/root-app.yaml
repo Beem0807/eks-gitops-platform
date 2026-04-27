@@ -11,7 +11,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/Beem0807/eks-gitops-platform.git
-    targetRevision: feature/ca-and-karpenter
+    targetRevision: main
     path: gitops
     directory:
       recurse: true
