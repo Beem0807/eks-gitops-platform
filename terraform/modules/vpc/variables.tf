@@ -28,3 +28,27 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "enable_karpenter_discovery_tags" {
+  description = "Whether to add Karpenter discovery tags to private subnets"
+  type        = bool
+  default     = false
+}
+
+variable "cluster_name" {
+  description = "EKS cluster name used for Karpenter discovery tags. Required only when enable_karpenter_discovery_tags is true."
+  type        = string
+  default     = null
+
+  validation {
+    condition = (
+      !var.enable_karpenter_discovery_tags ||
+      (
+        var.cluster_name != null &&
+        trimspace(var.cluster_name) != ""
+      )
+    )
+
+    error_message = "cluster_name must be provided when enable_karpenter_discovery_tags is true."
+  }
+}

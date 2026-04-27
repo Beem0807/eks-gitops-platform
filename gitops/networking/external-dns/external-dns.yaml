@@ -1,0 +1,84 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: external-dns
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: networking
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            argocd.argoproj.io/secret-type: cluster
+        values:
+          accountId: '{{index .metadata.annotations "aws-account-id"}}'
+          region: '{{index .metadata.labels "region"}}'
+          clusterName: '{{index .metadata.annotations "cluster-name"}}'
+          domainName: '{{index .metadata.annotations "domain-name"}}'
+  template:
+    metadata:
+      name: 'external-dns-{{.nameNormalized}}'
+      labels:
+        app.kubernetes.io/part-of: eks-gitops-platform
+        app.kubernetes.io/managed-by: argocd
+        app.kubernetes.io/component: networking
+    spec:
+      project: default
+      source:
+        repoURL: https://kubernetes-sigs.github.io/external-dns/
+        chart: external-dns
+        targetRevision: 1.15.0
+        helm:
+          releaseName: external-dns
+          values: |
+            provider:
+              name: aws
+
+            env:
+              - name: AWS_REGION
+                value: "{{ .values.region }}"
+
+            serviceAccount:
+              create: true
+              name: external-dns
+              annotations:
+                eks.amazonaws.com/role-arn: arn:aws:iam::{{ .values.accountId }}:role/{{ .values.clusterName }}-external-dns-irsa
+
+            txtOwnerId: {{ .values.clusterName }}
+            policy: sync
+
+            sources:
+              - ingress
+              - service
+
+            domainFilters:
+              - "{{ .values.domainName }}"
+
+            extraArgs:
+              - --aws-zone-type=public
+
+            nodeSelector:
+              app: core
+
+            tolerations:
+              - key: app
+                operator: Equal
+                value: core
+                effect: NoSchedule
+      destination:
+        server: '{{.server}}'
+        namespace: external-dns
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true

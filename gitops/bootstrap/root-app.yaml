@@ -3,11 +3,15 @@ kind: Application
 metadata:
   name: root-app
   namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: app-of-appset
 spec:
   project: default
   source:
     repoURL: https://github.com/Beem0807/eks-gitops-platform.git
-    targetRevision: main
+    targetRevision: feature/ca-and-karpenter
     path: gitops
     directory:
       recurse: true

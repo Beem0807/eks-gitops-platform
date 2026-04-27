@@ -1,0 +1,83 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: simple-time-service
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: workload
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            argocd.argoproj.io/secret-type: cluster
+        values:
+          domainName: '{{index .metadata.annotations "domain-name"}}'
+  template:
+    metadata:
+      name: simple-time-service-{{.nameNormalized}}
+      labels:
+        app.kubernetes.io/part-of: eks-gitops-platform
+        app.kubernetes.io/managed-by: argocd
+        app.kubernetes.io/component: workload
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/Beem0807/eks-gitops-platform.git
+        targetRevision: feature/ca-and-karpenter
+        path: charts/simple-time-service
+        helm:
+          values: |
+            image:
+              repository: docker.io/nabeemdev/simple-time-service
+              tag: latest
+
+            ingress:
+              enabled: true
+              className: alb
+              annotations:
+                kubernetes.io/ingress.class: alb
+                alb.ingress.kubernetes.io/scheme: internet-facing
+                alb.ingress.kubernetes.io/target-type: ip
+                alb.ingress.kubernetes.io/backend-protocol: HTTP
+                alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+                alb.ingress.kubernetes.io/ssl-redirect: "443"
+                alb.ingress.kubernetes.io/healthcheck-path: /health
+              hosts:
+                - host: simple-time-service.platform.{{ .values.domainName }}
+                  paths:
+                    - path: /
+                      pathType: Prefix
+
+            serviceMonitor:
+              enabled: true
+
+            hpa:
+              enabled: true
+
+            networkPolicy:
+              enabled: false
+
+            nodeSelector:
+              app: workload
+
+            tolerations:
+              - key: app
+                operator: Equal
+                value: workload
+                effect: NoSchedule
+      destination:
+        server: '{{.server}}'
+        namespace: simple-time-service
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

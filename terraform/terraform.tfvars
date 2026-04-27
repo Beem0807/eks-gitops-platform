@@ -20,4 +20,11 @@ instance_type = "m6a.large"
 
 node_desired_size = 2
 node_min_size     = 2
-node_max_size     = 2
+node_max_size     = 4
+
+environment    = "prod"
+
+domain_name    = "nabeem.com"
+
+add_cluster_autoscaler_tags = true
+enable_karpenter_discovery_tags = true

@@ -22,33 +22,49 @@ Both rules carry the label `notify: slack`. The Slack route matches on this labe
 
 ## Enabling Slack notifications
 
-The stack deploys without the Slack secret. Only the `alertmanager-slack` app shows as degraded in ArgoCD - Alertmanager itself runs fine on its default config.
+The Slack webhook URL is managed by External Secrets Operator. It is pulled from AWS Secrets Manager (secret name: `alertmanager-webhook`, key: `slackWebhookUrl`) and synced into the cluster automatically.
+
+To provision it, set the webhook URL before running the bootstrap script:
 
 ```bash
-# 1. Fill in your webhook URL
-cp secrets/alertmanager-config.example.yaml secrets/slack-webhook-url.yaml
-# Edit secrets/slack-webhook-url.yaml - paste your Slack incoming webhook URL
-
-# 2. Apply the secret
-kubectl apply -f secrets/slack-webhook-url.yaml -n monitoring
-
-# 3. Sync the ArgoCD app
-argocd app sync alertmanager-slack-simple-eks
+export TF_VAR_alertmanager_slack_webhook_url="https://hooks.slack.com/services/..."
+bash terraform/scripts/bootstrap.sh
 ```
 
-> `secrets/slack-webhook-url.yaml` is gitignored. Never commit it.
+If the cluster is already running and you need to update the webhook URL:
+
+```bash
+# Update the secret in AWS Secrets Manager
+aws secretsmanager put-secret-value \
+  --secret-id alertmanager-webhook \
+  --secret-string '{"slackWebhookUrl":"https://hooks.slack.com/services/..."}'
+
+# The ExternalSecret refreshes on its 1h interval, or force an immediate sync
+kubectl annotate externalsecret alertmanager-webhook-secret \
+  -n monitoring force-sync=$(date +%s) --overwrite
+```
+
+Check the sync status:
+
+```bash
+kubectl get externalsecret -n monitoring
+```
 
 ---
 
 ## Testing the Slack receiver
 
-Verify the full Alertmanager → Slack path without touching any cluster resources:
+Verify the full Alertmanager → Slack path without touching any cluster resources.
+
+Alertmanager is accessible at `https://alertmanager.platform.<your-domain>`, or use port-forward:
 
 ```bash
-# 1. Port-forward Alertmanager
 kubectl port-forward svc/prometheus-kube-prometheus-alertmanager -n monitoring 9093:9093
+```
 
-# 2. Fire a fake alert (in a second terminal)
+Fire a test alert:
+
+```bash
 curl -X POST http://localhost:9093/api/v2/alerts \
   -H 'Content-Type: application/json' \
   -d '[{
@@ -68,6 +84,8 @@ The alert appears in `#alerts-test` within 30 seconds and auto-resolves after 5 
 ## Silencing alerts
 
 **Via the Alertmanager UI:**
+
+Open `https://alertmanager.platform.<your-domain>` → **Silences** → **New Silence**. Or use port-forward:
 
 ```bash
 kubectl port-forward svc/prometheus-kube-prometheus-alertmanager -n monitoring 9093:9093

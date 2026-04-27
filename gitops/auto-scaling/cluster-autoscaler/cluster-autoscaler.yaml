@@ -1,0 +1,88 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: cluster-autoscaler
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: autoscaling
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            argocd.argoproj.io/secret-type: cluster
+        values:
+          accountId: '{{index .metadata.annotations "aws-account-id"}}'
+          clusterName: '{{index .metadata.annotations "cluster-name"}}'
+          region: '{{index .metadata.labels "region"}}'
+  template:
+    metadata:
+      name: 'cluster-autoscaler-{{.nameNormalized}}'
+      labels:
+        app.kubernetes.io/part-of: eks-gitops-platform
+        app.kubernetes.io/managed-by: argocd
+        app.kubernetes.io/component: autoscaling
+    spec:
+      project: default
+      source:
+        repoURL: https://kubernetes.github.io/autoscaler
+        chart: cluster-autoscaler
+        targetRevision: 9.50.1
+        helm:
+          releaseName: cluster-autoscaler
+          values: |
+            cloudProvider: aws
+
+            autoDiscovery:
+              clusterName: {{ .values.clusterName }}
+
+            awsRegion: {{ .values.region }}
+
+            image:
+              tag: v1.33.0
+
+            rbac:
+              serviceAccount:
+                create: true
+                name: cluster-autoscaler
+                annotations:
+                  eks.amazonaws.com/role-arn: arn:aws:iam::{{ .values.accountId }}:role/{{ .values.clusterName }}-cluster-autoscaler-irsa
+
+            extraArgs:
+              balance-similar-node-groups: "true"
+              expander: least-waste
+              skip-nodes-with-local-storage: "false"
+              skip-nodes-with-system-pods: "false"
+
+            nodeSelector:
+              app: core
+
+            tolerations:
+              - key: app
+                operator: Equal
+                value: core
+                effect: NoSchedule
+
+            resources:
+              requests:
+                cpu: 100m
+                memory: 300Mi
+              limits:
+                cpu: 200m
+                memory: 600Mi
+      destination:
+        server: '{{.server}}'
+        namespace: kube-system
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true

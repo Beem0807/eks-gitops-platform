@@ -3,6 +3,8 @@ kind: ApplicationSet
 metadata:
   name: prometheus
   namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
   labels:
     app.kubernetes.io/part-of: eks-gitops-platform
     app.kubernetes.io/managed-by: argocd
@@ -11,7 +13,14 @@ spec:
   goTemplate: true
   goTemplateOptions: ["missingkey=error"]
   generators:
-    - clusters: {}
+    - clusters:
+        selector:
+          matchLabels:
+            argocd.argoproj.io/secret-type: cluster
+        values:
+          domainName: '{{index .metadata.annotations "domain-name"}}'
+          accountId: '{{index .metadata.annotations "aws-account-id"}}'
+          clusterName: '{{index .metadata.annotations "cluster-name"}}'
   template:
     metadata:
       name: 'prometheus-{{.nameNormalized}}'
@@ -28,16 +37,131 @@ spec:
         helm:
           releaseName: prometheus
           values: |
+            crds:
+              enabled: false
+            
             grafana:
               enabled: true
+              annotations:
+                reloader.stakater.com/auto: "true"
+                secret.reloader.stakater.com/reload: "grafana-admin"
+              admin:
+                existingSecret: grafana-admin
+                userKey: admin-user
+                passwordKey: admin-password
+              
+              sidecar:
+                datasources:
+                  defaultDatasourceEnabled: false
+              
+              additionalDataSources:
+                - name: Thanos
+                  type: prometheus
+                  uid: thanos
+                  access: proxy
+                  url: http://thanos-query.monitoring.svc.cluster.local:9090
+                  isDefault: true
+                  jsonData:
+                    timeInterval: 30s
+              
+              tolerations:
+                - key: "app"
+                  operator: "Equal"
+                  value: "core"
+                  effect: "NoSchedule"
+              ingress:
+                enabled: true
+                ingressClassName: alb
+                annotations:
+                  alb.ingress.kubernetes.io/scheme: internet-facing
+                  alb.ingress.kubernetes.io/target-type: ip
+                  alb.ingress.kubernetes.io/backend-protocol: HTTP
+                  alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+                  alb.ingress.kubernetes.io/ssl-redirect: "443"
+                  alb.ingress.kubernetes.io/healthcheck-path: /api/health
+                  alb.ingress.kubernetes.io/group.name: platform-observability
+                hosts:
+                  - grafana.platform.{{ .values.domainName }}
+                path: /
+                pathType: Prefix
+                tls:
+                  - hosts:
+                      - grafana.platform.{{ .values.domainName }}
 
             alertmanager:
               enabled: true
+              ingress:
+                enabled: false
               alertmanagerSpec:
                 alertmanagerConfigSelector: {}
                 alertmanagerConfigNamespaceSelector: {}
                 alertmanagerConfigMatcherStrategy:
                   type: None
+                tolerations:
+                  - key: "app"
+                    operator: "Equal"
+                    value: "core"
+                    effect: "NoSchedule"
+
+            prometheus:
+              ingress:
+                enabled: false
+              thanosService:
+                enabled: true
+              thanosServiceMonitor:
+                enabled: true
+              serviceAccount:
+                annotations:
+                  eks.amazonaws.com/role-arn: arn:aws:iam::{{ .values.accountId }}:role/{{ .values.clusterName }}-thanos-prometheus-irsa
+              prometheusSpec:
+                serviceMonitorSelectorNilUsesHelmValues: false
+                retention: 7d
+                externalLabels:
+                  cluster: '{{ .values.clusterName }}'
+                  replica: prometheus
+                tolerations:
+                  - key: "app"
+                    operator: "Equal"
+                    value: "core"
+                    effect: "NoSchedule"
+                thanos:
+                  image: quay.io/thanos/thanos:v0.39.2
+                  objectStorageConfig:
+                    name: thanos-objstore-config
+                    key: objstore.yml
+
+            prometheusOperator:
+              tolerations:
+                - key: "app"
+                  operator: "Equal"
+                  value: "core"
+                  effect: "NoSchedule"
+              tls:
+                enabled: false
+              admissionWebhooks:
+                enabled: false
+                patch:
+                  enabled: false
+
+            kube-state-metrics:
+              tolerations:
+                - key: "app"
+                  operator: "Equal"
+                  value: "core"
+                  effect: "NoSchedule"
+
+            prometheus-node-exporter:
+              enabled: true
+              tolerations:
+                - operator: "Exists"
+                  effect: "NoSchedule"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 64Mi
 
             # kube-scheduler and kube-controller-manager are managed by AWS on EKS
             # and are not exposed for Prometheus scraping - disable these rules to avoid noise
@@ -50,19 +174,6 @@ spec:
               rules:
                 kubeSchedulerAlerting: false
                 kubeControllerManager: false
-
-            prometheus:
-              prometheusSpec:
-                retention: 7d
-                serviceMonitorSelectorNilUsesHelmValues: false
-
-            prometheusOperator:
-              tls:
-                enabled: false
-              admissionWebhooks:
-                enabled: false
-                patch:
-                  enabled: false
       destination:
         server: '{{.server}}'
         namespace: monitoring
@@ -72,4 +183,3 @@ spec:
           selfHeal: true
         syncOptions:
           - CreateNamespace=true
-          - ServerSideApply=true

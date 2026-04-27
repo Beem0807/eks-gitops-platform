@@ -11,7 +11,10 @@ spec:
   goTemplate: true
   goTemplateOptions: ["missingkey=error"]
   generators:
-    - clusters: {}
+    - clusters:
+        selector:
+          matchLabels:
+            argocd.argoproj.io/secret-type: cluster
   template:
     metadata:
       name: 'loki-{{.nameNormalized}}'
@@ -52,6 +55,11 @@ spec:
                 readOnlyRootFilesystem: false
 
             singleBinary:
+              tolerations:
+                - key: "app"
+                  operator: "Equal"
+                  value: "core"
+                  effect: "NoSchedule"
               replicas: 1
               persistence:
                 enabled: false
@@ -82,6 +90,11 @@ spec:
 
             gateway:
               enabled: true
+              tolerations:
+                - key: "app"
+                  operator: "Equal"
+                  value: "core"
+                  effect: "NoSchedule"
 
             lokiCanary:
               enabled: false

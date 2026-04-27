@@ -2,9 +2,7 @@ provider "aws" {
   region = var.aws_region
 }
 
-# Read the cluster details from AWS at apply time (not from a local kubeconfig file).
-# depends_on ensures this data source is only read after the cluster exists,
-# which handles both first-time creation and cluster replacement scenarios.
+# Read the cluster details from AWS at apply time.
 data "aws_eks_cluster" "cluster" {
   name       = var.cluster_name
   depends_on = [module.eks]

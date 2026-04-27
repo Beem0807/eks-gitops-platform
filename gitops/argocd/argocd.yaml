@@ -1,0 +1,59 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd-self
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://argoproj.github.io/argo-helm
+    chart: argo-cd
+    targetRevision: 9.4.17
+    helm:
+      releaseName: argocd
+      values: |
+        configs:
+          params:
+            server.insecure: true
+
+        server:
+          service:
+            type: ClusterIP
+          
+          deploymentAnnotations:
+            reloader.stakater.com/auto: "true"
+
+        global:
+          nodeSelector:
+            app: core
+
+          tolerations:
+            - key: app
+              operator: Equal
+              value: core
+              effect: NoSchedule
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  
+  ignoreDifferences:
+    - kind: Secret
+      name: argocd-secret
+      namespace: argocd
+      jsonPointers:
+        - /data/admin.password
+        - /data/admin.passwordMtime
+
+  syncPolicy:
+    automated:
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - ClientSideApplyMigration=false
+      - RespectIgnoreDifferences=true

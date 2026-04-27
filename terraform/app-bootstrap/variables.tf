@@ -78,3 +78,9 @@ variable "app_image_tag" {
   description = "Docker image tag"
   default     = "v1"
 }
+
+variable "enable_nlb_nodeport_rule" {
+  description = "Enable node security group rule for NodePort access from NLB"
+  type        = bool
+  default     = false
+}

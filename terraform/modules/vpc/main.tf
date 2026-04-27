@@ -16,9 +16,15 @@ module "vpc" {
     "kubernetes.io/role/elb" = "1"
   }
 
-  private_subnet_tags = {
-    "kubernetes.io/role/internal-elb" = "1"
-  }
+  private_subnet_tags = merge(
+    {
+      "kubernetes.io/role/internal-elb" = "1"
+    },
+    var.enable_karpenter_discovery_tags ? {
+      "karpenter.sh/discovery" = var.cluster_name
+      "subnet-type"            = "private"
+    } : {}
+  )
 
   tags = var.tags
 }

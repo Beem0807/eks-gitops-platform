@@ -11,12 +11,15 @@ spec:
   goTemplate: true
   goTemplateOptions: ["missingkey=error"]
   generators:
-    - clusters: {}
+    - clusters:
+        selector:
+          matchLabels:
+            argocd.argoproj.io/secret-type: cluster
   template:
     metadata:
       name: 'simple-time-service-alerts-{{.nameNormalized}}'
       annotations:
-        argocd.argoproj.io/sync-wave: "3"
+        argocd.argoproj.io/sync-wave: "5"
       labels:
         app.kubernetes.io/part-of: eks-gitops-platform
         app.kubernetes.io/managed-by: argocd
@@ -25,7 +28,7 @@ spec:
       project: default
       source:
         repoURL: https://github.com/Beem0807/eks-gitops-platform.git
-        targetRevision: main
+        targetRevision: feature/ca-and-karpenter
         path: charts/raw
         helm:
           releaseName: simple-time-service-alerts

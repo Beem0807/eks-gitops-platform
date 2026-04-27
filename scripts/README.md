@@ -7,7 +7,13 @@ Two scripts generate controlled HTTP traffic for validating Kubernetes HPA behav
 | `scripts/load_test.py` | Python stdlib | Quick, zero-dependency load generation |
 | `scripts/k6-staged.js` | k6 | Staged ramping-arrival-rate scenarios with built-in thresholds |
 
-Before running either script, forward the service port in one terminal:
+The service is accessible via ALB at `https://simple-time-service.platform.<your-domain>`. Pass it directly as the target URL:
+
+```bash
+BASE_URL=https://simple-time-service.platform.<your-domain>
+```
+
+Or port-forward for local testing:
 
 ```bash
 kubectl port-forward svc/simple-time-service -n simple-time-service 8080:80

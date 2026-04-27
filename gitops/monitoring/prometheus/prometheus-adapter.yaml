@@ -1,0 +1,84 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: prometheus-adapter
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: monitoring
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            argocd.argoproj.io/secret-type: cluster
+  template:
+    metadata:
+      name: 'prometheus-adapter-{{.nameNormalized}}'
+      labels:
+        app.kubernetes.io/part-of: eks-gitops-platform
+        app.kubernetes.io/managed-by: argocd
+        app.kubernetes.io/component: monitoring
+    spec:
+      project: default
+      source:
+        repoURL: https://prometheus-community.github.io/helm-charts
+        chart: prometheus-adapter
+        targetRevision: 4.14.1
+        helm:
+          releaseName: prometheus-adapter
+          values: |
+            replicas: 2
+
+            prometheus:
+              url: http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local
+              port: 9090
+
+            nodeSelector:
+              app: core
+
+            tolerations:
+              - key: app
+                operator: Equal
+                value: core
+                effect: NoSchedule
+
+            resources:
+              requests:
+                cpu: 100m
+                memory: 128Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+
+            podDisruptionBudget:
+              enabled: true
+              maxUnavailable: 1
+
+            livenessProbe:
+              failureThreshold: 10
+              initialDelaySeconds: 30
+              timeoutSeconds: 5
+
+            readinessProbe:
+              failureThreshold: 10
+              initialDelaySeconds: 30
+              timeoutSeconds: 5
+
+            rules:
+              default: true
+      destination:
+        server: '{{.server}}'
+        namespace: monitoring
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true

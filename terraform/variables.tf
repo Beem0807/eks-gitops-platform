@@ -64,3 +64,63 @@ variable "node_max_size" {
   description = "Maximum number of EKS worker nodes"
   default     = 2
 }
+
+variable "enable_nlb_nodeport_rule" {
+  description = "Enable node security group rule for NodePort access from NLB"
+  type        = bool
+  default     = false
+}
+
+variable "environment" {
+  description = "Environment name used in Argo CD cluster metadata"
+  type        = string
+  default     = "prod"
+}
+
+variable "domain_name" {
+  description = "Route53 Domain Name"
+  type        = string
+}
+
+variable "argocd_admin_password_plaintext" {
+  description = "Plain Argo CD admin password stored in Secrets Manager for recovery"
+  type        = string
+  default     = null
+  sensitive   = true
+}
+
+variable "argocd_admin_password_hash" {
+  description = "Bcrypt hash of Argo CD admin password"
+  type        = string
+  sensitive   = true
+}
+
+variable "grafana_admin_user" {
+  description = "Grafana admin username"
+  type        = string
+  default     = "admin"
+}
+
+variable "grafana_admin_password" {
+  description = "Grafana admin password"
+  type        = string
+  sensitive   = true
+}
+
+variable "alertmanager_slack_webhook_url" {
+  description = "Slack webhook URL for Alertmanager"
+  type        = string
+  sensitive   = true
+}
+
+variable "add_cluster_autoscaler_tags" {
+  description = "Whether to add Cluster Autoscaler discovery tags to the node group"
+  type        = bool
+  default     = false
+}
+
+variable "enable_karpenter_discovery_tags" {
+  description = "Whether to add Karpenter discovery tags to private subnets and node security group"
+  type        = bool
+  default     = false
+}

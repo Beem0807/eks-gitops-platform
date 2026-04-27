@@ -1,6 +1,6 @@
 # Terraform - AWS VPC and EKS Cluster
 
-This directory provisions the AWS infrastructure: a VPC and an EKS cluster. The `bootstrap/` subdirectory is an alternative module that provisions the full stack (infrastructure + app) in a single apply.
+This directory provisions the AWS infrastructure: a VPC and an EKS cluster. The `app-bootstrap/` subdirectory is an alternative module that provisions the full stack (infrastructure + app) in a single apply. Lifecycle scripts (bootstrap, upgrade, cleanup) live in `scripts/`.
 
 ---
 
@@ -21,12 +21,16 @@ This directory provisions the AWS infrastructure: a VPC and an EKS cluster. The 
 | Public subnets | 2 subnets (`10.0.0.0/26`, `10.0.0.64/26`) - tagged for external load balancers |
 | Private subnets | 2 subnets (`10.0.0.128/26`, `10.0.0.192/26`) - tagged for internal load balancers |
 | NAT Gateway | Single NAT gateway so private-subnet nodes can reach the internet |
-| EKS cluster | Kubernetes 1.33, API endpoint publicly accessible (restrict `public_access_cidrs` in production) |
-| Managed node group | `node_desired_size` × `m6a.large` on-demand nodes placed on private subnets only |
-| Node security group | Additional inbound rule: TCP 30000–32767 from `0.0.0.0/0` so the NLB can reach NodePorts |
-| EKS add-ons | `coredns`, `kube-proxy`, `vpc-cni` managed by the EKS module |
+| EKS cluster | Kubernetes 1.34, API endpoint publicly accessible (restrict `public_access_cidrs` in production) |
+| Managed node group | `node_desired_size` × `m6a.large` on-demand nodes on private subnets, labeled `app=core`, tainted `app=core:NoSchedule` |
+| Node security group | NLB NodePort rule optional (`enable_nlb_nodeport_rule`); Karpenter discovery tag when `enable_karpenter_discovery_tags=true` |
+| EKS add-ons | `coredns`, `kube-proxy`, `vpc-cni`, `eks-pod-identity-agent` managed by the EKS module |
+| Karpenter | IAM controller role + EKS Pod Identity association + node IAM role + instance profile + SQS interruption queue |
+| IRSA roles | Cluster Autoscaler, AWS Load Balancer Controller, ExternalDNS, External Secrets Operator, Thanos Prometheus sidecar, Thanos Compactor + StoreGateway |
+| Thanos S3 bucket | `<cluster-name>-thanos-metrics-<account-id>-<region>` — versioned, AES256-encrypted, public access blocked |
+| Secrets Manager | `argocd-admin`, `grafana-admin`, `alertmanager-webhook` secrets provisioned by Terraform |
 
-Modules used: [`terraform-aws-modules/eks/aws`](https://registry.terraform.io/modules/terraform-aws-modules/eks/aws/latest) and [`terraform-aws-modules/vpc/aws`](https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws/latest).
+Modules used: [`terraform-aws-modules/eks/aws`](https://registry.terraform.io/modules/terraform-aws-modules/eks/aws/latest), [`terraform-aws-modules/vpc/aws`](https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws/latest), and [`terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts`](https://registry.terraform.io/modules/terraform-aws-modules/iam/aws/latest).
 
 ---
 
@@ -104,15 +108,25 @@ All tuneable values are declared in `variables.tf` and can be overridden in `ter
 |----------|---------|-------------|
 | `aws_region` | `ap-south-1` | AWS region to deploy into |
 | `cluster_name` | `simple-eks` | EKS cluster name |
-| `vpc_name` | `eks-vpc` | VPC name tag |
+| `vpc_name` | (required) | VPC name tag |
 | `vpc_cidr` | `10.0.0.0/24` | VPC CIDR block |
 | `azs` | `["ap-south-1a", "ap-south-1b"]` | Availability zones |
 | `public_subnets` | `["10.0.0.0/26", "10.0.0.64/26"]` | Public subnet CIDRs |
 | `private_subnets` | `["10.0.0.128/26", "10.0.0.192/26"]` | Private subnet CIDRs |
-| `instance_type` | `m6a.large` | EC2 instance type for worker nodes |
-| `node_desired_size` | `2` | Desired number of worker nodes |
-| `node_min_size` | `2` | Minimum number of worker nodes |
-| `node_max_size` | `2` | Maximum number of worker nodes |
+| `instance_type` | `m6a.large` | EC2 instance type for the core managed node group |
+| `node_desired_size` | `2` | Desired number of core worker nodes |
+| `node_min_size` | `2` | Minimum number of core worker nodes |
+| `node_max_size` | `2` | Maximum number of core worker nodes (`terraform.tfvars` sets `4`) |
+| `environment` | `prod` | Environment label used in ArgoCD cluster metadata |
+| `domain_name` | (required) | Route53 hosted zone domain for ExternalDNS |
+| `enable_nlb_nodeport_rule` | `false` | Add NodePort security group rule for NLB (app-bootstrap only) |
+| `add_cluster_autoscaler_tags` | `false` | Add Cluster Autoscaler discovery tags to the node group |
+| `enable_karpenter_discovery_tags` | `false` | Add Karpenter discovery tags to private subnets and node SG |
+| `argocd_admin_password_hash` | (required) | Bcrypt hash of ArgoCD admin password (set by `bootstrap.sh`) |
+| `argocd_admin_password_plaintext` | `null` | Plaintext password stored in Secrets Manager for recovery |
+| `grafana_admin_user` | `admin` | Grafana admin username |
+| `grafana_admin_password` | (required) | Grafana admin password (set by `bootstrap.sh`) |
+| `alertmanager_slack_webhook_url` | (required) | Slack incoming webhook URL for Alertmanager |
 
 To deploy in a different region, update `aws_region` and the `azs` list in `terraform.tfvars`.
 
@@ -165,26 +179,67 @@ Confirm with `yes`. This removes all AWS resources created by Terraform.
 
 ---
 
-## Bootstrap - one-step infrastructure and app deployment
+## Lifecycle scripts
 
-`terraform/bootstrap/` is an alternative root module that provisions the full stack - VPC, EKS cluster, Kubernetes namespace, and the SimpleTimeService Helm release - in a single `terraform apply`. Use it when you want the complete environment without separately running ArgoCD.
+All scripts live in `terraform/scripts/` and require `terraform`, `aws`, `kubectl`, `openssl`, `git`, and `htpasswd` (`brew install httpd` on macOS).
 
-> **Portability note:** The bootstrap module uses `local-exec` provisioners that shell out to `aws`, `kubectl`, `curl`, and `nslookup`. It works well on a prepared local machine, but it is not purely provider-driven Terraform.
+### bootstrap.sh — full cluster bring-up
 
-### What the bootstrap module does differently
+`terraform/scripts/bootstrap.sh` is the recommended end-to-end bootstrap path. It:
 
-| Step | Root `terraform/` | `terraform/bootstrap/` |
-|------|-------------------|------------------------|
+1. Runs `terraform apply` in `terraform/` to provision infrastructure and secrets
+2. Runs `aws eks update-kubeconfig`
+3. Installs ArgoCD via Helm (`argo-cd` chart v9.4.17)
+4. Creates the ArgoCD cluster secret with cluster metadata annotations used by ApplicationSet generators
+5. Applies `gitops/bootstrap/root-app.yaml` to start full GitOps reconciliation
+
+```bash
+# Required - Slack webhook URL
+export TF_VAR_alertmanager_slack_webhook_url="https://hooks.slack.com/..."
+
+# Optional - auto-generated if not set
+# export ARGOCD_ADMIN_PASSWORD="<password>"
+# export TF_VAR_grafana_admin_password="<password>"
+# export TF_VAR_argocd_admin_password_hash="<bcrypt-hash>"  # skip htpasswd generation
+
+bash terraform/scripts/bootstrap.sh
+```
+
+### upgrade.sh — re-apply Terraform on a running cluster
+
+Use `upgrade.sh` when you need to apply Terraform changes or rotate secrets without reinstalling ArgoCD. It re-runs Terraform, refreshes the ArgoCD cluster secret with the latest outputs (including the Thanos bucket name), and force-annotates all three ExternalSecrets to trigger an immediate re-sync.
+
+```bash
+export TF_VAR_alertmanager_slack_webhook_url="https://hooks.slack.com/..."
+bash terraform/scripts/upgrade.sh
+```
+
+### cleanup.sh — tear everything down
+
+`terraform/scripts/cleanup.sh` removes all ArgoCD apps then destroys the full infrastructure.
+
+---
+
+## App-bootstrap - one-step infrastructure and app deployment
+
+`terraform/app-bootstrap/` is an alternative Terraform root module that provisions the full stack - VPC, EKS cluster, Kubernetes namespace, and the SimpleTimeService Helm release - in a single `terraform apply`. Use it for a quick demo without ArgoCD.
+
+> **Portability note:** The module uses `local-exec` provisioners that shell out to `aws`, `kubectl`, `curl`, and `nslookup`. It works well on a prepared local machine, but it is not purely provider-driven Terraform.
+
+### What the app-bootstrap module does differently
+
+| Step | Root `terraform/` | `terraform/app-bootstrap/` |
+|------|-------------------|---------------------------|
 | VPC + EKS | Yes | Yes (same shared modules) |
 | Update kubeconfig | No | Yes (`null_resource` runs `aws eks update-kubeconfig`) |
 | Create namespace | No | Yes (`kubernetes_namespace`) |
 | Deploy SimpleTimeService | No | Yes (Helm release with NLB service) |
 | Remote state key | `terraform.tfstate` | `bootstrap/terraform.tfstate` |
 
-### Deploying with bootstrap
+### Deploying with app-bootstrap
 
 ```bash
-cd terraform/bootstrap
+cd terraform/app-bootstrap
 
 terraform init
 terraform plan
@@ -206,7 +261,7 @@ Terraform polls the EKS API server every 15 seconds (up to 5 minutes) before pro
 
 ### NLB NodePort security group rule
 
-The EKS module adds this rule to the node security group:
+When `enable_nlb_nodeport_rule = true`, the EKS module adds this rule to the node security group:
 
 ```hcl
 node_security_group_additional_rules = {
@@ -225,15 +280,15 @@ An NLB operates at Layer 4 and preserves the original client IP. Because of this
 
 > In production, restrict this range to the NLB's subnet CIDRs if your NLB is internal.
 
-### Bootstrap remote state
+### App-bootstrap remote state
 
-The bootstrap module uses the same S3 bucket as the root module but stores state under a different key (`bootstrap/terraform.tfstate`). Both modules can coexist without interfering.
+The app-bootstrap module uses the same S3 bucket as the root module but stores state under a different key (`bootstrap/terraform.tfstate`). Both modules can coexist without interfering.
 
-### Destroying the bootstrap stack
+### Destroying the app-bootstrap stack
 
 ```bash
-cd terraform/bootstrap
+cd terraform/app-bootstrap
 terraform destroy
 ```
 
-This removes all resources provisioned by the bootstrap module, including the Helm release, namespace, EKS cluster, and VPC.
+This removes all resources provisioned by the app-bootstrap module, including the Helm release, namespace, EKS cluster, and VPC.
