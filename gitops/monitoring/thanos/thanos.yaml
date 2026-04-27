@@ -81,7 +81,7 @@ spec:
                   value: core
                   effect: NoSchedule
 
-            storeGateway:
+            storegateway:
               enabled: true
               persistence:
                 enabled: false
