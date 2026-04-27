@@ -22,7 +22,7 @@ The `gitops/monitoring/` directory deploys the full observability stack via Argo
 | Grafana | Dashboards UI, ALB Ingress at `grafana.platform.<domain>`, auto-provisioned datasources |
 | Alertmanager | Alert routing and grouping, ALB Ingress at `alertmanager.platform.<domain>` (basic auth) |
 | Prometheus Operator | Manages `PrometheusRule` and `ServiceMonitor` CRDs |
-| Prometheus Adapter | Custom metrics API (`/apis/custom.metrics.k8s.io`) — enables HPA on arbitrary Prometheus queries |
+| Prometheus Adapter | Custom metrics API (`/apis/custom.metrics.k8s.io`) - enables HPA on arbitrary Prometheus queries |
 | Thanos Query | Unified query endpoint across Prometheus and S3-backed historical data |
 | Thanos Compactor | Downsamples and enforces retention: 30d raw / 90d 5m / 180d 1h |
 | Thanos StoreGateway | Serves historical blocks from S3 to Thanos Query |

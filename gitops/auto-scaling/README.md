@@ -123,7 +123,7 @@ kubectl get ec2nodeclass workload
 
 ## metrics-server
 
-A hard prerequisite for HPA — without it the HPA controller cannot read pod CPU/memory utilization and no scaling decisions are made.
+A hard prerequisite for HPA - without it the HPA controller cannot read pod CPU/memory utilization and no scaling decisions are made.
 
 | Setting | Value |
 |---------|-------|

@@ -34,7 +34,7 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 | [charts/raw/README.md](charts/raw/README.md) | Generic chart for deploying arbitrary K8s resources via ApplicationSets |
 | [k8s/README.md](k8s/README.md) | Raw Kubernetes manifest (quick-start, no Helm) |
 | [scripts/README.md](scripts/README.md) | Load testing with Python and k6 |
-| [terraform/scripts/](terraform/scripts/) | `bootstrap.sh` — full cluster bring-up; `upgrade.sh` — re-apply Terraform + rotate secrets; `cleanup.sh` — tear everything down |
+| [terraform/scripts/](terraform/scripts/) | `bootstrap.sh` - full cluster bring-up; `upgrade.sh` - re-apply Terraform + rotate secrets; `cleanup.sh` - tear everything down |
 | **GitOps** | |
 | [gitops/README.md](gitops/README.md) | ArgoCD install, bootstrap, sync policy, application inventory |
 | [gitops/auto-scaling/README.md](gitops/auto-scaling/README.md) | Cluster Autoscaler, Karpenter, NodePool config, metrics-server, HPA |
@@ -61,7 +61,7 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 
 The ALB Ingress for every service (ArgoCD, Grafana, Prometheus, Alertmanager, SimpleTimeService) uses HTTPS with HTTP → HTTPS redirect. The ALB listener looks up a certificate by domain match, so an ACM certificate covering your domain **must exist and be validated** before running `bootstrap.sh`.
 
-A wildcard certificate is the simplest option — one cert covers all subdomains:
+A wildcard certificate is the simplest option - one cert covers all subdomains:
 
 ```bash
 # Request a wildcard cert for *.platform.<your-domain>
@@ -85,7 +85,7 @@ aws acm wait certificate-validated \
   --region ap-south-1
 ```
 
-The ALB controller discovers the certificate automatically by matching the Ingress hostname against ACM-issued certificates in the same region — no ARN needs to be set in the Ingress annotations.
+The ALB controller discovers the certificate automatically by matching the Ingress hostname against ACM-issued certificates in the same region - no ARN needs to be set in the Ingress annotations.
 
 ---
 
@@ -133,7 +133,7 @@ kubectl get applications -n argocd -w
 
 ## Upgrading
 
-Use `upgrade.sh` whenever you need to re-apply Terraform changes or rotate secrets on an existing cluster. Unlike `bootstrap.sh` it does **not** reinstall ArgoCD or re-apply the root app — it just runs Terraform, refreshes the ArgoCD cluster secret with the latest outputs, and force-annotates all three ExternalSecrets so they re-pull from Secrets Manager.
+Use `upgrade.sh` whenever you need to re-apply Terraform changes or rotate secrets on an existing cluster. Unlike `bootstrap.sh` it does **not** reinstall ArgoCD or re-apply the root app - it just runs Terraform, refreshes the ArgoCD cluster secret with the latest outputs, and force-annotates all three ExternalSecrets so they re-pull from Secrets Manager.
 
 **When to use it:**
 - You changed a Terraform resource and want to apply it

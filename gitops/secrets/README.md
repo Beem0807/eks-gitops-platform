@@ -40,7 +40,7 @@ Deployments roll automatically
 
 ## External Secrets Operator
 
-Installs the controller, admission webhook, and cert-controller — all pinned to core nodes.
+Installs the controller, admission webhook, and cert-controller - all pinned to core nodes.
 
 | Setting | Value |
 |---------|-------|
@@ -75,7 +75,7 @@ provider:
           namespace: external-secrets
 ```
 
-The region is injected at deploy time from the ArgoCD cluster secret `region` label — no hardcoded values in the manifest.
+The region is injected at deploy time from the ArgoCD cluster secret `region` label - no hardcoded values in the manifest.
 
 Verify it is ready:
 
@@ -92,11 +92,11 @@ Three `ExternalSecret` resources are deployed by their respective component apps
 
 | ExternalSecret | Namespace | Secrets Manager secret | Keys synced | Target K8s secret | Creation policy |
 |----------------|-----------|----------------------|-------------|-------------------|-----------------|
-| `argocd-admin-password` | `argocd` | `argocd-admin` | `adminPasswordHash` → `admin.password`<br>`adminPasswordMtime` → `admin.passwordMtime` | `argocd-secret` | `Merge` — patches the existing ArgoCD secret |
+| `argocd-admin-password` | `argocd` | `argocd-admin` | `adminPasswordHash` → `admin.password`<br>`adminPasswordMtime` → `admin.passwordMtime` | `argocd-secret` | `Merge` - patches the existing ArgoCD secret |
 | `grafana-admin` | `monitoring` | `grafana-admin` | `adminUser` → `admin-user`<br>`adminPassword` → `admin-password` | `grafana-admin` | `Owner` |
 | `alertmanager-webhook` | `monitoring` | `alertmanager-webhook` | `slackWebhookUrl` → `slack-webhook-url` | `alertmanager-webhook` | `Owner` |
 
-The ArgoCD secret uses `Merge` + `Retain` (deletion policy) because `argocd-secret` is pre-created by the ArgoCD Helm chart — ESO patches it rather than owning it.
+The ArgoCD secret uses `Merge` + `Retain` (deletion policy) because `argocd-secret` is pre-created by the ArgoCD Helm chart - ESO patches it rather than owning it.
 
 Check the sync status of all ExternalSecrets:
 
@@ -150,7 +150,7 @@ Stakater Reloader watches for changes to Secrets and ConfigMaps and triggers a r
 | Setting | Value |
 |---------|-------|
 | Chart | `reloader` v1.1.0 (from `https://stakater.github.io/stakater-charts`) |
-| `watchGlobally` | `true` — watches all namespaces |
+| `watchGlobally` | `true` - watches all namespaces |
 
 ### Annotations
 

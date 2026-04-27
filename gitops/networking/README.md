@@ -11,9 +11,9 @@ Both run on core nodes and use IRSA for AWS API access.
 
 ---
 
-## Prerequisites — ACM certificate
+## Prerequisites - ACM certificate
 
-Every ALB Ingress in this platform redirects HTTP → HTTPS. The ALB controller discovers the certificate by matching the Ingress hostname against ACM-issued certs in the same region. **The certificate must be in `ISSUED` state before bootstrap** — if it is missing or still pending validation, the ALB listener cannot be created and all HTTPS endpoints will be unreachable.
+Every ALB Ingress in this platform redirects HTTP → HTTPS. The ALB controller discovers the certificate by matching the Ingress hostname against ACM-issued certs in the same region. **The certificate must be in `ISSUED` state before bootstrap** - if it is missing or still pending validation, the ALB listener cannot be created and all HTTPS endpoints will be unreachable.
 
 A single wildcard certificate covers all platform subdomains:
 
@@ -36,7 +36,7 @@ aws acm wait certificate-validated \
   --region ap-south-1
 ```
 
-No ARN needs to be set in Ingress annotations — the controller automatically selects the best matching certificate from ACM.
+No ARN needs to be set in Ingress annotations - the controller automatically selects the best matching certificate from ACM.
 
 ---
 
@@ -96,7 +96,7 @@ kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controll
 
 ## ExternalDNS
 
-Watches `Ingress` and `Service` resources and creates or updates Route53 records to match their hostnames. Uses `policy: sync` — records are deleted when the Ingress/Service is removed.
+Watches `Ingress` and `Service` resources and creates or updates Route53 records to match their hostnames. Uses `policy: sync` - records are deleted when the Ingress/Service is removed.
 
 | Setting | Value |
 |---------|-------|
@@ -104,7 +104,7 @@ Watches `Ingress` and `Service` resources and creates or updates Route53 records
 | Provider | `aws` |
 | Sources | `ingress`, `service` |
 | Domain filter | injected from ArgoCD cluster secret annotation `domain-name` |
-| TXT owner ID | `<cluster-name>` — used to identify records owned by this cluster |
+| TXT owner ID | `<cluster-name>` - used to identify records owned by this cluster |
 | Zone type | public only (`--aws-zone-type=public`) |
 | IRSA | `<cluster-name>-external-dns-irsa` |
 
@@ -138,4 +138,4 @@ aws route53 list-resource-record-sets \
 | ALB created but returns 503 | Target group health checks failing. Confirm pods are `Running` and the health check path (`/health`) returns 200. |
 | DNS not resolving | Check ExternalDNS logs for Route53 API errors. Confirm `domain-name` annotation on the ArgoCD cluster secret matches the actual hosted zone. |
 | DNS resolves but certificate error | The ACM certificate must cover the hostname (wildcard `*.platform.<domain>` recommended). Check ALB listener certificate in the AWS console. |
-| `kubectl get ingress` shows no `ADDRESS` | ALB provisioning in progress — takes 1–3 minutes. Check LBC logs for errors. |
+| `kubectl get ingress` shows no `ADDRESS` | ALB provisioning in progress - takes 1–3 minutes. Check LBC logs for errors. |
