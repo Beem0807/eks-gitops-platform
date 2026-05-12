@@ -34,7 +34,6 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 | [charts/raw/README.md](charts/raw/README.md) | Generic chart for deploying arbitrary K8s resources via ApplicationSets |
 | [k8s/README.md](k8s/README.md) | Raw Kubernetes manifest (quick-start, no Helm) |
 | [scripts/README.md](scripts/README.md) | Load testing with Python and k6 |
-| [terraform/scripts/](terraform/scripts/) | `bootstrap.sh` - full cluster bring-up; `upgrade.sh` - re-apply Terraform + rotate secrets; `cleanup.sh` - tear everything down |
 | **GitOps** | |
 | [gitops/README.md](gitops/README.md) | ArgoCD install, bootstrap, sync policy, application inventory |
 | [gitops/auto-scaling/README.md](gitops/auto-scaling/README.md) | Cluster Autoscaler, Karpenter, NodePool config, metrics-server, HPA |
@@ -118,7 +117,7 @@ export TF_VAR_alertmanager_slack_webhook_url="https://hooks.slack.com/..."
 # 2. Run the bootstrap script - provisions infra, installs ArgoCD via Helm, applies root app
 bash terraform/scripts/bootstrap.sh
 
-# The script prints all credentials at completion.
+# Once complete, services are reachable at:
 # ArgoCD:       https://argocd.platform.<your-domain>
 # Service:      https://simple-time-service.platform.<your-domain>
 # Grafana:      https://grafana.platform.<your-domain>
