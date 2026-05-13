@@ -119,6 +119,7 @@ VPC_ID="$(terraform output -raw vpc_id)"
 DOMAIN_NAME="$(terraform output -raw domain_name)"
 KARPENTER_INSTANCE_PROFILE_NAME="$(terraform output -raw karpenter_instance_profile_name 2>/dev/null || true)"
 THANOS_BUCKET_NAME="$(terraform output -raw thanos_bucket_name 2>/dev/null || true)"
+LOKI_BUCKET_NAME="$(terraform output -raw loki_bucket_name 2>/dev/null || true)"
 
 echo "Updating kubeconfig..."
 aws eks update-kubeconfig \
@@ -145,6 +146,7 @@ metadata:
     domain-name: "${DOMAIN_NAME}"
     karpenter-instance-profile-name: "${KARPENTER_INSTANCE_PROFILE_NAME}"
     thanos-bucket-name: "${THANOS_BUCKET_NAME}"
+    loki-bucket-name: "${LOKI_BUCKET_NAME}"
 type: Opaque
 stringData:
   name: in-cluster-local

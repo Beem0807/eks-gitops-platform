@@ -30,3 +30,7 @@ output "karpenter_instance_profile_name" {
 output "thanos_bucket_name" {
   value = aws_s3_bucket.thanos.bucket
 }
+
+output "loki_bucket_name" {
+  value = aws_s3_bucket.loki.bucket
+}

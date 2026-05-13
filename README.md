@@ -5,7 +5,7 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 | Component | What it does |
 |-----------|-------------|
 | **SimpleTimeService** | Minimal Python microservice - returns timestamp + caller IP as JSON |
-| **Terraform** | Provisions AWS VPC, EKS cluster, IRSA roles, Karpenter, S3 bucket for Thanos, and Secrets Manager secrets |
+| **Terraform** | Provisions AWS VPC, EKS cluster, IRSA roles, Karpenter, S3 buckets for Thanos and Loki, and Secrets Manager secrets |
 | **ArgoCD (App of Apps)** | GitOps engine - self-managed via Helm, all platform components reconcile from this repo |
 | **AWS Load Balancer Controller** | Provisions ALB Ingress for services and ArgoCD |
 | **EBS CSI Driver** | Provisions EBS volumes for stateful workloads (Prometheus, Thanos); creates `gp3` as the default StorageClass |
@@ -19,7 +19,7 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 | **Prometheus Adapter** | Exposes Prometheus metrics via the Kubernetes custom metrics API, enabling custom-metric HPA |
 | **Thanos** | Long-term metric storage - Prometheus sidecar ships data to S3; Query, Compactor, and StoreGateway provide durable retention |
 | **HPA + metrics-server** | Horizontal pod autoscaling based on CPU utilization |
-| **Loki + Fluent Bit** | Centralized log aggregation, queryable in Grafana |
+| **Loki + Fluent Bit** | Centralized log aggregation backed by S3 object storage, queryable in Grafana |
 
 > **Name mapping:** `SimpleTimeService` = source in `app/` = Helm release `simple-time-service` = manifest in `k8s/microservice.yaml`. All the same thing.
 
@@ -296,6 +296,7 @@ bash terraform/scripts/upgrade.sh
     ├── external-secrets-irsa.tf                # IRSA for External Secrets Operator
     ├── ebs-csi-driver-irsa.tf                  # IRSA for EBS CSI Driver controller
     ├── thanos.tf                               # S3 bucket + IRSA roles for Thanos Prometheus sidecar, Compactor, StoreGateway
+    ├── loki.tf                                 # S3 bucket + IRSA role for Loki object storage
     ├── secrets-manager.tf                      # AWS Secrets Manager secrets (ArgoCD, Grafana, Slack)
     ├── scripts/                                # Shell scripts for full GitOps lifecycle
     │   ├── bootstrap.sh                        # End-to-end: terraform + ArgoCD Helm + projects + root-app
@@ -332,7 +333,8 @@ These are production-grade patterns used throughout the platform, documented her
 - **Core/workload node split** - managed node group nodes are tainted `app=core:NoSchedule` and run system components. Karpenter provisions separate workload nodes (tainted `app=workload:NoSchedule`) for the application. This keeps system stability independent of application scaling — a misbehaving workload cannot starve the control plane components.
 - **ArgoCD self-managed via Helm** - bootstrapped once by `bootstrap.sh`, then manages its own upgrades and config through Git (`gitops/argocd/argocd.yaml`). All ArgoCD changes are auditable and reversible via the same GitOps workflow as everything else. The initial `helm install` is unavoidable (you need the engine running before it can manage itself), but it is the only manual step.
 - **Prometheus CRDs managed separately** - `prometheus-crds.yaml` installs CRDs at sync-wave 0 before `kube-prometheus-stack`. This decouples CRD lifecycle from the operator release, allowing CRD upgrades without touching the operator and avoiding the Helm CRD upgrade limitation.
-- **EBS CSI Driver and persistent storage** - the EBS CSI Driver runs at sync-wave 1 so storage is available before any stateful workload installs. It creates a `gp3` StorageClass set as the cluster default (`WaitForFirstConsumer`, `Retain` reclaim policy, encryption enabled). Prometheus uses a 20 Gi PVC for its TSDB, Alertmanager uses a 2 Gi PVC for state (silences, notifications), and Thanos Compactor and StoreGateway each use their own PVCs (10 Gi and 5 Gi respectively). Loki is intentionally left on `emptyDir` pending migration to an S3 object store backend.
+- **EBS CSI Driver and persistent storage** - the EBS CSI Driver runs at sync-wave 1 so storage is available before any stateful workload installs. It creates a `gp3` StorageClass set as the cluster default (`WaitForFirstConsumer`, `Retain` reclaim policy, encryption enabled). Prometheus uses a 20 Gi PVC for its TSDB, Alertmanager uses a 2 Gi PVC for state (silences, notifications), and Thanos Compactor and StoreGateway each use their own PVCs (10 Gi and 5 Gi respectively). Loki uses S3 for chunk and index storage so no EBS volume is needed.
+- **Loki S3 storage** - Loki runs in SingleBinary mode with S3 as its object store backend. The bucket name is injected into the ArgoCD cluster secret as `loki-bucket-name` by `bootstrap.sh`/`upgrade.sh`, resolved at sync time via the ApplicationSet cluster generator, and consumed as `lokiBucketName` in Helm values. The Loki service account is annotated with an IRSA role that grants scoped read/write access to the Loki bucket — no static credentials are required.
 - **Thanos long-term retention** - Prometheus ships blocks to an S3 bucket via the Thanos sidecar. Compactor enforces retention (30d raw / 90d 5m / 180d 1h). StoreGateway serves historical queries. Query runs alongside Prometheus for a unified query endpoint.
 - **Prometheus Adapter** - bridges Prometheus metrics into the Kubernetes custom metrics API. Enables HPA rules that scale on arbitrary Prometheus queries rather than just CPU/memory.
 
@@ -345,7 +347,6 @@ These are intentional shortcuts for a demo environment, with the production-read
 - **EKS 1.34** - cluster runs Kubernetes 1.34. Pin to the latest supported version and track the EKS support window (~14 months per minor version) before going to production.
 - **Prometheus Operator TLS and webhooks disabled** - simplifies initial bootstrap reliability; re-enable for production deployments.
 - **Prometheus and Alertmanager no ingress** - neither UI is exposed publicly; access is via `kubectl port-forward` only. This avoids the need for auth on those endpoints in the demo. For production, expose them behind OIDC/OAuth2 (e.g. oauth2-proxy) rather than open ALB ingress.
-- **Loki on emptyDir** - logs are ephemeral; a Loki pod restart drops all stored log data. Replace with an S3/GCS backend for any environment where logs need to survive pod restarts.
 - **Network Policy disabled by default** - the chart includes a `NetworkPolicy` resource but it is off by default, meaning there is no east-west traffic isolation between namespaces. Enabling it requires two steps: turning on the VPC CNI Network Policy controller in Terraform, then setting `networkPolicy.enabled: true` in the ArgoCD ApplicationSet. See [gitops/README.md](gitops/README.md#network-policy).
 
 ---

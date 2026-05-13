@@ -15,6 +15,11 @@ spec:
         selector:
           matchLabels:
             argocd.argoproj.io/secret-type: cluster
+        values:
+          accountId: '{{index .metadata.annotations "aws-account-id"}}'
+          region: '{{index .metadata.labels "region"}}'
+          clusterName: '{{index .metadata.annotations "cluster-name"}}'
+          lokiBucketName: '{{index .metadata.annotations "loki-bucket-name"}}'
   template:
     metadata:
       name: 'loki-{{.nameNormalized}}'
@@ -43,16 +48,25 @@ spec:
                 configs:
                   - from: "2024-01-01"
                     store: tsdb
-                    object_store: filesystem
+                    object_store: s3
                     schema: v13
                     index:
                       prefix: loki_index_
                       period: 24h
               storage:
-                type: filesystem
+                type: s3
+                s3:
+                  region: {{ .values.region }}
+                  bucketnames: {{ .values.lokiBucketName }}
+                  s3ForcePathStyle: false
               rulerConfig: {}
               containerSecurityContext:
                 readOnlyRootFilesystem: false
+
+            serviceAccount:
+              create: true
+              annotations:
+                eks.amazonaws.com/role-arn: arn:aws:iam::{{ .values.accountId }}:role/{{ .values.clusterName }}-loki-irsa
 
             singleBinary:
               tolerations:
@@ -63,12 +77,6 @@ spec:
               replicas: 1
               persistence:
                 enabled: false
-              extraVolumes:
-                - name: loki-data
-                  emptyDir: {}
-              extraVolumeMounts:
-                - name: loki-data
-                  mountPath: /var/loki
             
             ruler:
               enabled: false

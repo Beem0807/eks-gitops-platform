@@ -20,6 +20,9 @@ The `gitops/logs/` directory deploys the full log pipeline via ArgoCD.
 loki-gateway.logging.svc.cluster.local
     ▼
 Loki (SingleBinary, logging namespace)
+    │  chunks + index written to S3 via IRSA
+    ▼
+S3 bucket: <cluster-name>-loki-logs-<account-id>-<region>
     ▼
 Grafana datasource ConfigMap (monitoring namespace)
     │  auto-provisioned by grafana-sidecar
@@ -44,11 +47,13 @@ Runs in `SingleBinary` mode - all components in one pod. Suitable for demos and 
 | Setting | Value | Notes |
 |---------|-------|-------|
 | Mode | `SingleBinary` | One pod, all components |
-| Storage | `filesystem` on `emptyDir` | **Logs are lost on pod restart** - use S3/GCS in production |
+| Storage | S3 (`object_store: s3`) | Chunks and index stored durably in S3; logs survive pod restarts |
 | Replication | `1` | No redundancy |
 | Schema | `v13` (TSDB, from `2024-01-01`) | Current recommended schema |
 | Auth | disabled (`auth_enabled: false`) | Single-tenant mode |
 | Gateway | enabled | Exposes `loki-gateway` ClusterIP used by Fluent Bit and Grafana |
+| IRSA | `<cluster-name>-loki-irsa` | Grants scoped S3 read/write access; no static credentials |
+| Bucket | `<cluster-name>-loki-logs-<account-id>-<region>` | Provisioned by `terraform/loki.tf` |
 
 ---
 
