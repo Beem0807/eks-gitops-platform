@@ -39,6 +39,9 @@ gitops/
 ├── storage/
 │   └── ebs-csi-driver/
 │       └── ebs-csi-driver.yaml                 # ApplicationSet - AWS EBS CSI Driver (wave 1)
+├── backup/
+│   └── velero/
+│       └── velero.yaml                         # ApplicationSet - Velero backup and restore (wave 2)
 ├── secrets/
 │   ├── external-secrets/
 │   │   ├── external-secret-operator.yaml       # ApplicationSet - External Secrets Operator (wave 1)
@@ -165,6 +168,7 @@ Any push to `main` affecting `gitops/` or `charts/` is automatically applied wit
 | reloader | reloader | platform | 1 | Stakater Reloader (watches Secrets/ConfigMaps) |
 | aws-load-balancer-controller | kube-system | platform | 1 | ALB Ingress controller |
 | aws-ebs-csi-driver | kube-system | platform | 1 | EBS volumes + `gp3` default StorageClass |
+| velero | velero | platform | 2 | Cluster backup and restore to S3 + EBS snapshots |
 | external-dns | external-dns | platform | 1 | Route53 DNS records from Ingress/Service |
 | cluster-autoscaler | kube-system | platform | 1 | Scales managed node group on pending pods |
 | karpenter | karpenter | platform | 2 | Karpenter controller (workload node provisioner) |

@@ -34,3 +34,7 @@ output "thanos_bucket_name" {
 output "loki_bucket_name" {
   value = aws_s3_bucket.loki.bucket
 }
+
+output "velero_bucket_name" {
+  value = aws_s3_bucket.velero.bucket
+}

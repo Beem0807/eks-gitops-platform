@@ -141,6 +141,12 @@ cleanup_kubernetes_resources() {
     --ignore-not-found=true \
     --wait=false || true
 
+  echo "Deleting PersistentVolumes (Retain policy prevents automatic deletion)..."
+  kubectl delete pv \
+    --all \
+    --ignore-not-found=true \
+    --wait=false || true
+
   echo "Deleting application namespaces..."
   kubectl delete namespace reloader --ignore-not-found=true --wait=false || true
   kubectl delete namespace monitoring --ignore-not-found=true --wait=false || true
@@ -148,6 +154,7 @@ cleanup_kubernetes_resources() {
   kubectl delete namespace external-secrets --ignore-not-found=true --wait=false || true
   kubectl delete namespace external-dns --ignore-not-found=true --wait=false || true
   kubectl delete namespace karpenter --ignore-not-found=true --wait=false || true
+  kubectl delete namespace velero --ignore-not-found=true --wait=false || true
 
   echo "Deleting Argo CD namespace..."
   kubectl delete namespace "$ARGOCD_NS" \
@@ -230,8 +237,63 @@ cleanup_leftover_aws_load_balancers() {
   done
 }
 
+cleanup_ebs_volumes_and_snapshots() {
+  if [[ -z "$CLUSTER_NAME" || -z "$AWS_REGION" ]]; then
+    echo "Terraform outputs cluster_name/region not available. Skipping EBS cleanup."
+    return 0
+  fi
+
+  echo "Deleting EBS volumes tagged for cluster: $CLUSTER_NAME..."
+
+  VOLUME_IDS="$(aws ec2 describe-volumes \
+    --region "$AWS_REGION" \
+    --filters "Name=tag:kubernetes.io/cluster/${CLUSTER_NAME},Values=owned" \
+    --query "Volumes[].VolumeId" \
+    --output text 2>/dev/null || true)"
+
+  for volume_id in $VOLUME_IDS; do
+    echo "Deleting EBS volume: $volume_id"
+    aws ec2 delete-volume \
+      --region "$AWS_REGION" \
+      --volume-id "$volume_id" || true
+  done
+
+  echo "Deleting Velero EBS snapshots for cluster: $CLUSTER_NAME..."
+
+  SNAPSHOT_IDS="$(aws ec2 describe-snapshots \
+    --region "$AWS_REGION" \
+    --owner-ids self \
+    --filters "Name=tag:kubernetes.io/cluster/${CLUSTER_NAME},Values=owned" \
+    --query "Snapshots[].SnapshotId" \
+    --output text 2>/dev/null || true)"
+
+  for snapshot_id in $SNAPSHOT_IDS; do
+    echo "Deleting EBS snapshot: $snapshot_id"
+    aws ec2 delete-snapshot \
+      --region "$AWS_REGION" \
+      --snapshot-id "$snapshot_id" || true
+  done
+
+  echo "Deleting any remaining Velero snapshots (velero.io/backup tag)..."
+
+  VELERO_SNAPSHOT_IDS="$(aws ec2 describe-snapshots \
+    --region "$AWS_REGION" \
+    --owner-ids self \
+    --filters "Name=tag-key,Values=velero.io/backup" \
+    --query "Snapshots[].SnapshotId" \
+    --output text 2>/dev/null || true)"
+
+  for snapshot_id in $VELERO_SNAPSHOT_IDS; do
+    echo "Deleting Velero snapshot: $snapshot_id"
+    aws ec2 delete-snapshot \
+      --region "$AWS_REGION" \
+      --snapshot-id "$snapshot_id" || true
+  done
+}
+
 cleanup_kubernetes_resources
 cleanup_leftover_aws_load_balancers
+cleanup_ebs_volumes_and_snapshots
 
 echo "Running Terraform destroy..."
 

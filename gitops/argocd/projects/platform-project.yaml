@@ -22,6 +22,7 @@ spec:
     - https://kubernetes-sigs.github.io/metrics-server/
     # Storage
     - https://kubernetes-sigs.github.io/aws-ebs-csi-driver/
+    - https://vmware-tanzu.github.io/helm-charts
     # Secrets
     - https://charts.external-secrets.io
     - https://stakater.github.io/stakater-charts
@@ -41,6 +42,8 @@ spec:
       namespace: external-dns
     - server: https://kubernetes.default.svc
       namespace: reloader
+    - server: https://kubernetes.default.svc
+      namespace: velero
 
   # Infrastructure tools install CRDs, ClusterRoles, and webhooks — allow all cluster-scoped resources
   clusterResourceWhitelist:

@@ -26,9 +26,10 @@ This directory provisions the AWS infrastructure: a VPC and an EKS cluster. The 
 | Node security group | NLB NodePort rule optional (`enable_nlb_nodeport_rule`); Karpenter discovery tag when `enable_karpenter_discovery_tags=true` |
 | EKS add-ons | `coredns`, `kube-proxy`, `vpc-cni`, `eks-pod-identity-agent` managed by the EKS module |
 | Karpenter | IAM controller role + EKS Pod Identity association + node IAM role + instance profile + SQS interruption queue |
-| IRSA roles | Cluster Autoscaler, AWS Load Balancer Controller, ExternalDNS, External Secrets Operator, EBS CSI Driver controller, Thanos Prometheus sidecar, Thanos Compactor + StoreGateway, Loki |
+| IRSA roles | Cluster Autoscaler, AWS Load Balancer Controller, ExternalDNS, External Secrets Operator, EBS CSI Driver controller, Thanos Prometheus sidecar, Thanos Compactor + StoreGateway, Loki, Velero |
 | Thanos S3 bucket | `<cluster-name>-thanos-metrics-<account-id>-<region>` - versioned, AES256-encrypted, public access blocked |
 | Loki S3 bucket | `<cluster-name>-loki-logs-<account-id>-<region>` - versioned, AES256-encrypted, public access blocked |
+| Velero S3 bucket | `<cluster-name>-velero-backups-<account-id>-<region>` - versioned, AES256-encrypted, public access blocked |
 | Secrets Manager | `argocd-admin`, `grafana-admin`, `alertmanager-webhook` secrets provisioned by Terraform |
 
 Modules used: [`terraform-aws-modules/eks/aws`](https://registry.terraform.io/modules/terraform-aws-modules/eks/aws/latest), [`terraform-aws-modules/vpc/aws`](https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws/latest), and [`terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts`](https://registry.terraform.io/modules/terraform-aws-modules/iam/aws/latest).
@@ -217,7 +218,12 @@ bash terraform/scripts/upgrade.sh
 
 ### cleanup.sh - tear everything down
 
-`terraform/scripts/cleanup.sh` removes all ArgoCD apps then destroys the full infrastructure.
+`terraform/scripts/cleanup.sh` removes all ArgoCD apps, cleans up AWS resources that Terraform cannot track, then destroys the full infrastructure. It runs four steps in order:
+
+1. **Kubernetes resources** — deletes the root app, all ArgoCD Applications and ApplicationSets, Ingresses, LoadBalancer Services, Karpenter NodePools and NodeClaims, PersistentVolumes, and all platform namespaces (including `velero`)
+2. **AWS Load Balancers** — deletes leftover ALB/NLB/Classic ELBs tagged for the cluster
+3. **EBS volumes and snapshots** — deletes EBS volumes tagged `kubernetes.io/cluster/<cluster>=owned` (CSI Driver PVCs left behind by the `Retain` reclaim policy), then deletes EBS snapshots tagged for the cluster or carrying a `velero.io/backup` tag
+4. **Terraform destroy** — removes all remaining AWS resources
 
 ---
 

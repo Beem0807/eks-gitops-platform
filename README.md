@@ -5,7 +5,7 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 | Component | What it does |
 |-----------|-------------|
 | **SimpleTimeService** | Minimal Python microservice - returns timestamp + caller IP as JSON |
-| **Terraform** | Provisions AWS VPC, EKS cluster, IRSA roles, Karpenter, S3 buckets for Thanos and Loki, and Secrets Manager secrets |
+| **Terraform** | Provisions AWS VPC, EKS cluster, IRSA roles, Karpenter, S3 buckets for Thanos, Loki, and Velero, and Secrets Manager secrets |
 | **ArgoCD (App of Apps)** | GitOps engine - self-managed via Helm, all platform components reconcile from this repo |
 | **AWS Load Balancer Controller** | Provisions ALB Ingress for services and ArgoCD |
 | **EBS CSI Driver** | Provisions EBS volumes for stateful workloads (Prometheus, Thanos); creates `gp3` as the default StorageClass |
@@ -20,6 +20,7 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 | **Thanos** | Long-term metric storage - Prometheus sidecar ships data to S3; Query, Compactor, and StoreGateway provide durable retention |
 | **HPA + metrics-server** | Horizontal pod autoscaling based on CPU utilization |
 | **Loki + Fluent Bit** | Centralized log aggregation backed by S3 object storage, queryable in Grafana |
+| **Velero** | Cluster backup and restore - backs up Kubernetes resources and EBS volume snapshots to S3 |
 
 > **Name mapping:** `SimpleTimeService` = source in `app/` = Helm release `simple-time-service` = manifest in `k8s/microservice.yaml`. All the same thing.
 
@@ -249,6 +250,9 @@ bash terraform/scripts/upgrade.sh
 │   ├── storage/
 │   │   └── ebs-csi-driver/
 │   │       └── ebs-csi-driver.yaml             # ApplicationSet - AWS EBS CSI Driver (sync-wave 1)
+│   ├── backup/
+│   │   └── velero/
+│   │       └── velero.yaml                     # ApplicationSet - Velero backup and restore (sync-wave 2)
 │   ├── secrets/
 │   │   ├── external-secrets/
 │   │   │   ├── external-secret-operator.yaml   # ApplicationSet - External Secrets Operator
@@ -297,6 +301,7 @@ bash terraform/scripts/upgrade.sh
     ├── ebs-csi-driver-irsa.tf                  # IRSA for EBS CSI Driver controller
     ├── thanos.tf                               # S3 bucket + IRSA roles for Thanos Prometheus sidecar, Compactor, StoreGateway
     ├── loki.tf                                 # S3 bucket + IRSA role for Loki object storage
+    ├── velero.tf                               # S3 bucket + IRSA role for Velero backups
     ├── secrets-manager.tf                      # AWS Secrets Manager secrets (ArgoCD, Grafana, Slack)
     ├── scripts/                                # Shell scripts for full GitOps lifecycle
     │   ├── bootstrap.sh                        # End-to-end: terraform + ArgoCD Helm + projects + root-app
@@ -361,10 +366,19 @@ bash terraform/scripts/cleanup.sh
 cd terraform/app-bootstrap && terraform destroy
 ```
 
-> The S3 state bucket and Thanos metrics bucket are not removed by `terraform destroy`. Delete them manually when no longer needed:
+The cleanup script runs four steps in order:
+
+1. **Kubernetes resources** — deletes the root app, all ArgoCD Applications and ApplicationSets, Ingresses, LoadBalancer Services, Karpenter NodePools and NodeClaims, PersistentVolumes, and all platform namespaces (including `velero`)
+2. **AWS Load Balancers** — deletes any leftover ALB/NLB/Classic ELBs tagged for the cluster that were not removed by step 1
+3. **EBS volumes and snapshots** — deletes EBS volumes tagged `kubernetes.io/cluster/<cluster>=owned` (CSI Driver PVCs with Retain policy), then deletes EBS snapshots tagged for the cluster or with a `velero.io/backup` tag
+4. **Terraform destroy** — removes all AWS resources provisioned by Terraform
+
+> The following S3 buckets are **not** removed by `terraform destroy` — delete them manually when no longer needed:
 > ```bash
 > aws s3 rb s3://<your-state-bucket> --force
 > aws s3 rb s3://<cluster-name>-thanos-metrics-<account-id>-<region> --force
+> aws s3 rb s3://<cluster-name>-loki-logs-<account-id>-<region> --force
+> aws s3 rb s3://<cluster-name>-velero-backups-<account-id>-<region> --force
 > ```
 
 ---
