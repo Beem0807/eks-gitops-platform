@@ -8,6 +8,7 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 | **Terraform** | Provisions AWS VPC, EKS cluster, IRSA roles, Karpenter, S3 bucket for Thanos, and Secrets Manager secrets |
 | **ArgoCD (App of Apps)** | GitOps engine - self-managed via Helm, all platform components reconcile from this repo |
 | **AWS Load Balancer Controller** | Provisions ALB Ingress for services and ArgoCD |
+| **EBS CSI Driver** | Provisions EBS volumes for stateful workloads (Prometheus, Thanos); creates `gp3` as the default StorageClass |
 | **External DNS** | Creates Route53 DNS records from Ingress/Service annotations |
 | **Cluster Autoscaler** | Scales the managed node group based on pending pods |
 | **Karpenter** | Provisions workload nodes on-demand (`t3a.medium` / `c6a.large`) |
@@ -245,6 +246,9 @@ bash terraform/scripts/upgrade.sh
 │   │   │   └── aws-load-balancer-controller.yaml  # ApplicationSet - AWS Load Balancer Controller
 │   │   └── external-dns/
 │   │       └── external-dns.yaml               # ApplicationSet - ExternalDNS for Route53
+│   ├── storage/
+│   │   └── ebs-csi-driver/
+│   │       └── ebs-csi-driver.yaml             # ApplicationSet - AWS EBS CSI Driver (sync-wave 1)
 │   ├── secrets/
 │   │   ├── external-secrets/
 │   │   │   ├── external-secret-operator.yaml   # ApplicationSet - External Secrets Operator
@@ -290,6 +294,7 @@ bash terraform/scripts/upgrade.sh
     ├── aws-load-balancer-controller-irsa.tf    # IRSA for AWS Load Balancer Controller
     ├── external-dns-irsa.tf                    # IRSA for ExternalDNS
     ├── external-secrets-irsa.tf                # IRSA for External Secrets Operator
+    ├── ebs-csi-driver-irsa.tf                  # IRSA for EBS CSI Driver controller
     ├── thanos.tf                               # S3 bucket + IRSA roles for Thanos Prometheus sidecar, Compactor, StoreGateway
     ├── secrets-manager.tf                      # AWS Secrets Manager secrets (ArgoCD, Grafana, Slack)
     ├── scripts/                                # Shell scripts for full GitOps lifecycle
@@ -327,6 +332,7 @@ These are production-grade patterns used throughout the platform, documented her
 - **Core/workload node split** - managed node group nodes are tainted `app=core:NoSchedule` and run system components. Karpenter provisions separate workload nodes (tainted `app=workload:NoSchedule`) for the application. This keeps system stability independent of application scaling — a misbehaving workload cannot starve the control plane components.
 - **ArgoCD self-managed via Helm** - bootstrapped once by `bootstrap.sh`, then manages its own upgrades and config through Git (`gitops/argocd/argocd.yaml`). All ArgoCD changes are auditable and reversible via the same GitOps workflow as everything else. The initial `helm install` is unavoidable (you need the engine running before it can manage itself), but it is the only manual step.
 - **Prometheus CRDs managed separately** - `prometheus-crds.yaml` installs CRDs at sync-wave 0 before `kube-prometheus-stack`. This decouples CRD lifecycle from the operator release, allowing CRD upgrades without touching the operator and avoiding the Helm CRD upgrade limitation.
+- **EBS CSI Driver and persistent storage** - the EBS CSI Driver runs at sync-wave 1 so storage is available before any stateful workload installs. It creates a `gp3` StorageClass set as the cluster default (`WaitForFirstConsumer`, `Retain` reclaim policy, encryption enabled). Prometheus uses a 20 Gi PVC for its TSDB, Alertmanager uses a 2 Gi PVC for state (silences, notifications), and Thanos Compactor and StoreGateway each use their own PVCs (10 Gi and 5 Gi respectively). Loki is intentionally left on `emptyDir` pending migration to an S3 object store backend.
 - **Thanos long-term retention** - Prometheus ships blocks to an S3 bucket via the Thanos sidecar. Compactor enforces retention (30d raw / 90d 5m / 180d 1h). StoreGateway serves historical queries. Query runs alongside Prometheus for a unified query endpoint.
 - **Prometheus Adapter** - bridges Prometheus metrics into the Kubernetes custom metrics API. Enables HPA rules that scale on arbitrary Prometheus queries rather than just CPU/memory.
 

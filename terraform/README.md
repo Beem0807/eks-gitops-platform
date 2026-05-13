@@ -26,7 +26,7 @@ This directory provisions the AWS infrastructure: a VPC and an EKS cluster. The 
 | Node security group | NLB NodePort rule optional (`enable_nlb_nodeport_rule`); Karpenter discovery tag when `enable_karpenter_discovery_tags=true` |
 | EKS add-ons | `coredns`, `kube-proxy`, `vpc-cni`, `eks-pod-identity-agent` managed by the EKS module |
 | Karpenter | IAM controller role + EKS Pod Identity association + node IAM role + instance profile + SQS interruption queue |
-| IRSA roles | Cluster Autoscaler, AWS Load Balancer Controller, ExternalDNS, External Secrets Operator, Thanos Prometheus sidecar, Thanos Compactor + StoreGateway |
+| IRSA roles | Cluster Autoscaler, AWS Load Balancer Controller, ExternalDNS, External Secrets Operator, EBS CSI Driver controller, Thanos Prometheus sidecar, Thanos Compactor + StoreGateway |
 | Thanos S3 bucket | `<cluster-name>-thanos-metrics-<account-id>-<region>` - versioned, AES256-encrypted, public access blocked |
 | Secrets Manager | `argocd-admin`, `grafana-admin`, `alertmanager-webhook` secrets provisioned by Terraform |
 

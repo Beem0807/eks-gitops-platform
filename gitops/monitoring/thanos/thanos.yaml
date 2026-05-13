@@ -72,7 +72,9 @@ spec:
               retentionResolution5m: 90d
               retentionResolution1h: 180d
               persistence:
-                enabled: false
+                enabled: true
+                storageClass: gp3
+                size: 10Gi
               serviceAccount:
                 create: true
                 name: thanos-compactor
@@ -89,7 +91,9 @@ spec:
             storegateway:
               enabled: true
               persistence:
-                enabled: false
+                enabled: true
+                storageClass: gp3
+                size: 5Gi
               serviceAccount:
                 create: true
                 name: thanos-storegateway

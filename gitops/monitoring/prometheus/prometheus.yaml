@@ -102,6 +102,14 @@ spec:
                     operator: "Equal"
                     value: "core"
                     effect: "NoSchedule"
+                storage:
+                  volumeClaimTemplate:
+                    spec:
+                      storageClassName: gp3
+                      accessModes: ["ReadWriteOnce"]
+                      resources:
+                        requests:
+                          storage: 2Gi
 
             prometheus:
               ingress:
@@ -124,6 +132,14 @@ spec:
                     operator: "Equal"
                     value: "core"
                     effect: "NoSchedule"
+                storageSpec:
+                  volumeClaimTemplate:
+                    spec:
+                      storageClassName: gp3
+                      accessModes: ["ReadWriteOnce"]
+                      resources:
+                        requests:
+                          storage: 20Gi
                 thanos:
                   image: quay.io/thanos/thanos:v0.39.2
                   objectStorageConfig:
