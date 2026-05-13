@@ -18,14 +18,14 @@ The `gitops/monitoring/` directory deploys the full observability stack via Argo
 
 | Component | Details |
 |-----------|---------|
-| Prometheus | Metrics collection, 7-day local retention, Thanos sidecar ships blocks to S3, no ingress - access via `kubectl port-forward` |
+| Prometheus | Metrics collection, 7-day local retention, Thanos sidecar ships blocks to S3, 20Gi EBS PVC (`gp3`), no ingress - access via `kubectl port-forward` |
 | Grafana | Dashboards UI, ALB Ingress at `grafana.platform.<domain>`, auto-provisioned datasources |
-| Alertmanager | Alert routing and grouping, no ingress - access via `kubectl port-forward` |
+| Alertmanager | Alert routing and grouping, 2Gi EBS PVC (`gp3`) for state persistence, no ingress - access via `kubectl port-forward` |
 | Prometheus Operator | Manages `PrometheusRule` and `ServiceMonitor` CRDs |
 | Prometheus Adapter | Custom metrics API (`/apis/custom.metrics.k8s.io`) - enables HPA on arbitrary Prometheus queries |
 | Thanos Query | Unified query endpoint across Prometheus and S3-backed historical data |
-| Thanos Compactor | Downsamples and enforces retention: 30d raw / 90d 5m / 180d 1h |
-| Thanos StoreGateway | Serves historical blocks from S3 to Thanos Query |
+| Thanos Compactor | Downsamples and enforces retention: 30d raw / 90d 5m / 180d 1h; 10Gi EBS PVC (`gp3`) |
+| Thanos StoreGateway | Serves historical blocks from S3 to Thanos Query; 5Gi EBS PVC (`gp3`) |
 | kube-state-metrics | Kubernetes object/state metrics (Deployments, Pods, resource requests) |
 
 All components land in the `monitoring` namespace, created automatically by ArgoCD via `CreateNamespace=true`.

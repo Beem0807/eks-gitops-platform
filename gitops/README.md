@@ -37,11 +37,14 @@ gitops/
 │   └── external-dns/
 │       └── external-dns.yaml                   # ApplicationSet - ExternalDNS for Route53 (wave 1)
 ├── storage/
+│   ├── README.md
 │   └── ebs-csi-driver/
 │       └── ebs-csi-driver.yaml                 # ApplicationSet - AWS EBS CSI Driver (wave 1)
 ├── backup/
+│   ├── README.md
 │   └── velero/
-│       └── velero.yaml                         # ApplicationSet - Velero backup and restore (wave 2)
+│       ├── velero.yaml                         # ApplicationSet - Velero backup and restore (wave 2)
+│       └── velero-schedule.yaml                # ApplicationSet - daily full-cluster backup Schedule (wave 3)
 ├── secrets/
 │   ├── external-secrets/
 │   │   ├── external-secret-operator.yaml       # ApplicationSet - External Secrets Operator (wave 1)
@@ -80,9 +83,11 @@ gitops/
 | [auto-scaling/README.md](auto-scaling/README.md) | Cluster Autoscaler, Karpenter, NodePool config, metrics-server, HPA |
 | [networking/README.md](networking/README.md) | AWS Load Balancer Controller, ExternalDNS, Ingress annotations |
 | [secrets/README.md](secrets/README.md) | External Secrets Operator, ClusterSecretStore, ExternalSecret mappings, Reloader |
+| [storage/README.md](storage/README.md) | EBS CSI Driver, gp3 StorageClass, PVC inventory |
+| [backup/README.md](backup/README.md) | Velero, S3 backup location, EBS snapshots, backup and restore commands |
 | [monitoring/README.md](monitoring/README.md) | Prometheus, Grafana, Thanos, Prometheus Adapter, ServiceMonitor |
 | [alerts/README.md](alerts/README.md) | PrometheusRules, Slack setup, testing, silencing, grouping |
-| [logs/README.md](logs/README.md) | Loki, Fluent Bit, Grafana datasource, LogQL queries |
+| [logs/README.md](logs/README.md) | Loki S3 backend, Fluent Bit, Grafana datasource, LogQL queries |
 
 ---
 
@@ -169,6 +174,7 @@ Any push to `main` affecting `gitops/` or `charts/` is automatically applied wit
 | aws-load-balancer-controller | kube-system | platform | 1 | ALB Ingress controller |
 | aws-ebs-csi-driver | kube-system | platform | 1 | EBS volumes + `gp3` default StorageClass |
 | velero | velero | platform | 2 | Cluster backup and restore to S3 + EBS snapshots |
+| velero-schedule | velero | platform | 3 | Daily full-cluster backup at 02:00 UTC, 30-day retention |
 | external-dns | external-dns | platform | 1 | Route53 DNS records from Ingress/Service |
 | cluster-autoscaler | kube-system | platform | 1 | Scales managed node group on pending pods |
 | karpenter | karpenter | platform | 2 | Karpenter controller (workload node provisioner) |
@@ -197,7 +203,7 @@ All ApplicationSets are scoped to one of three AppProjects defined in `gitops/ar
 
 | Project | File | Allowed namespaces | Cluster resources | Covers |
 |---------|------|--------------------|-------------------|--------|
-| `platform` | `platform-project.yaml` | `argocd`, `kube-system`, `karpenter`, `external-secrets`, `external-dns`, `reloader` | All (`*/*`) — infra tools install CRDs and cluster RBAC | ArgoCD, bootstrap, networking, autoscaling, secrets |
+| `platform` | `platform-project.yaml` | `argocd`, `kube-system`, `karpenter`, `external-secrets`, `external-dns`, `reloader`, `velero` | All (`*/*`) — infra tools install CRDs and cluster RBAC | ArgoCD, bootstrap, networking, autoscaling, secrets, storage, backup |
 | `observability` | `observability-project.yaml` | `monitoring`, `logging` | `CustomResourceDefinition`, `ClusterRole`, `ClusterRoleBinding` | Prometheus, Grafana, Thanos, Loki, Fluent Bit, alerts |
 | `workloads` | `workloads-project.yaml` | `simple-time-service` | None | Application workloads |
 

@@ -41,9 +41,11 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 | [gitops/auto-scaling/README.md](gitops/auto-scaling/README.md) | Cluster Autoscaler, Karpenter, NodePool config, metrics-server, HPA |
 | [gitops/networking/README.md](gitops/networking/README.md) | AWS Load Balancer Controller, ExternalDNS, Ingress annotations |
 | [gitops/secrets/README.md](gitops/secrets/README.md) | External Secrets Operator, ClusterSecretStore, ExternalSecret mappings, Reloader |
-| [gitops/monitoring/README.md](gitops/monitoring/README.md) | Prometheus, Grafana, Thanos, Prometheus Adapter, ServiceMonitor |
+| [gitops/storage/README.md](gitops/storage/README.md) | EBS CSI Driver, gp3 StorageClass, PVC inventory |
+| [gitops/backup/README.md](gitops/backup/README.md) | Velero, S3 backup location, EBS snapshots, backup and restore commands |
+| [gitops/monitoring/README.md](gitops/monitoring/README.md) | Prometheus, Grafana, Thanos, Prometheus Adapter, ServiceMonitor, EBS persistence |
 | [gitops/alerts/README.md](gitops/alerts/README.md) | PrometheusRules, Slack alerting, silencing, grouping |
-| [gitops/logs/README.md](gitops/logs/README.md) | Loki, Fluent Bit, log querying in Grafana |
+| [gitops/logs/README.md](gitops/logs/README.md) | Loki S3 backend, Fluent Bit, log querying in Grafana |
 
 ---
 
@@ -139,7 +141,7 @@ Use `upgrade.sh` whenever you need to re-apply Terraform changes or rotate secre
 **When to use it:**
 - You changed a Terraform resource and want to apply it
 - You want to rotate the ArgoCD admin, Grafana admin, or Alertmanager Slack webhook secret
-- The ArgoCD cluster secret is stale (e.g. after a Karpenter instance profile or Thanos bucket name change)
+- The ArgoCD cluster secret is stale (e.g. after a Karpenter instance profile or Thanos, Loki, or Velero bucket name change)
 
 ```bash
 # Slack webhook is always required
@@ -158,7 +160,7 @@ bash terraform/scripts/upgrade.sh
 2. Generates or accepts ArgoCD bcrypt hash and Grafana password
 3. Runs `terraform init` → `terraform validate` → `terraform apply`
 4. Updates kubeconfig
-5. Re-applies the ArgoCD cluster secret with the latest Terraform outputs (account ID, VPC ID, domain, Karpenter instance profile, Thanos bucket name)
+5. Re-applies the ArgoCD cluster secret with the latest Terraform outputs (account ID, VPC ID, domain, Karpenter instance profile, Thanos/Loki/Velero bucket names)
 6. Force-annotates `argocd-admin`, `grafana-admin`, and `alertmanager-webhook` ExternalSecrets to trigger an immediate re-sync from Secrets Manager
 
 ---
@@ -177,6 +179,8 @@ bash terraform/scripts/upgrade.sh
 | 8 | Loki API reachable | `kubectl port-forward svc/loki-gateway -n logging 3100:80` → `curl 'http://localhost:3100/loki/api/v1/labels'` |
 | 9 | Logs in Grafana | Explore → Loki datasource → `{namespace="simple-time-service"}` |
 | 10 | Thanos Query healthy | `kubectl get pods -n monitoring -l app.kubernetes.io/name=thanos-query` - `Running`; add Thanos datasource in Grafana pointing to `thanos-query.monitoring.svc:9090` |
+| 11 | EBS volumes provisioned | `kubectl get pv` - PVs for Prometheus (20Gi), Alertmanager (2Gi), Thanos Compactor (10Gi), StoreGateway (5Gi) all `Bound` |
+| 12 | Velero running | `kubectl get pods -n velero` - `Running`; `kubectl get backupstoragelocation -n velero` - `Available` |
 
 ---
 
@@ -248,11 +252,14 @@ bash terraform/scripts/upgrade.sh
 │   │   └── external-dns/
 │   │       └── external-dns.yaml               # ApplicationSet - ExternalDNS for Route53
 │   ├── storage/
+│   │   ├── README.md
 │   │   └── ebs-csi-driver/
 │   │       └── ebs-csi-driver.yaml             # ApplicationSet - AWS EBS CSI Driver (sync-wave 1)
 │   ├── backup/
+│   │   ├── README.md
 │   │   └── velero/
-│   │       └── velero.yaml                     # ApplicationSet - Velero backup and restore (sync-wave 2)
+│   │       ├── velero.yaml                     # ApplicationSet - Velero backup and restore (sync-wave 2)
+│   │       └── velero-schedule.yaml            # ApplicationSet - daily full-cluster backup Schedule (sync-wave 3)
 │   ├── secrets/
 │   │   ├── external-secrets/
 │   │   │   ├── external-secret-operator.yaml   # ApplicationSet - External Secrets Operator
