@@ -20,6 +20,8 @@ spec:
     - https://kubernetes.github.io/autoscaler
     - public.ecr.aws/karpenter
     - https://kubernetes-sigs.github.io/metrics-server/
+    # Storage
+    - https://kubernetes-sigs.github.io/aws-ebs-csi-driver/
     # Secrets
     - https://charts.external-secrets.io
     - https://stakater.github.io/stakater-charts
