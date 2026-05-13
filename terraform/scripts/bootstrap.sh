@@ -6,6 +6,7 @@ TF_DIR="${ROOT_DIR}/terraform"
 
 ARGOCD_NS="argocd"
 ROOT_APP="${ROOT_DIR}/gitops/bootstrap/root-app.yaml"
+PROJECTS_DIR="${ROOT_DIR}/gitops/argocd/projects"
 
 ARGOCD_HELM_RELEASE="argocd"
 ARGOCD_HELM_REPO_NAME="argo"
@@ -53,6 +54,11 @@ fi
 
 if [[ ! -f "$ROOT_APP" ]]; then
   echo "ERROR: Missing root app manifest: $ROOT_APP"
+  exit 1
+fi
+
+if [[ ! -d "$PROJECTS_DIR" ]] || [[ -z "$(ls "$PROJECTS_DIR"/*.yaml 2>/dev/null)" ]]; then
+  echo "ERROR: No project manifests found in: $PROJECTS_DIR"
   exit 1
 fi
 
@@ -241,6 +247,9 @@ stringData:
       }
     }
 EOF
+
+echo "Applying ArgoCD projects..."
+kubectl apply -f "$PROJECTS_DIR/"
 
 echo "Applying root app..."
 kubectl apply -f "$ROOT_APP"

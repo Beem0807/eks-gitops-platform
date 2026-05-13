@@ -13,6 +13,10 @@ gitops/
 ├── bootstrap/
 │   └── root-app.yaml                           # Root Application - bootstraps everything below
 ├── argocd/
+│   ├── projects/
+│   │   ├── platform-project.yaml               # AppProject - ArgoCD, infra, networking, secrets
+│   │   ├── observability-project.yaml          # AppProject - monitoring, logging, alerting
+│   │   └── workloads-project.yaml              # AppProject - application workloads
 │   ├── argocd.yaml                             # Application - ArgoCD self-managed via Helm
 │   ├── argocd-admin-secret.yaml                # ApplicationSet - ExternalSecret for ArgoCD admin password
 │   └── argocd-ingress.yaml                     # ApplicationSet - ALB Ingress at argocd.platform.<domain>
@@ -94,7 +98,7 @@ export TF_VAR_alertmanager_slack_webhook_url="https://hooks.slack.com/..."
 bash terraform/scripts/bootstrap.sh
 ```
 
-The script installs ArgoCD using the official Helm chart (`argo-cd` v9.4.17) and then applies the root app. ArgoCD takes over and manages its own Helm release from that point on via `gitops/argocd/argocd.yaml`.
+The script installs ArgoCD using the official Helm chart (`argo-cd` v9.4.17), applies all AppProjects from `gitops/argocd/projects/`, and then applies the root app. ArgoCD takes over and manages its own Helm release from that point on via `gitops/argocd/argocd.yaml`. Any future project changes pushed to `main` are automatically reconciled by the root app (it recurses the entire `gitops/` directory).
 
 Retrieve the admin password (set by the bootstrap script and stored in AWS Secrets Manager):
 
@@ -147,35 +151,49 @@ Any push to `main` affecting `gitops/` or `charts/` is automatically applied wit
 
 ## Application inventory
 
-| App | Namespace | Sync wave | Purpose |
-|-----|-----------|-----------|---------|
-| root-app | argocd | — | Discovers all other apps |
-| argocd-self | argocd | — | ArgoCD self-managed via Helm |
-| argocd-admin-secret | argocd | 3 | Syncs ArgoCD admin password from Secrets Manager |
-| argocd-ingress | argocd | 2 | ALB Ingress at `argocd.platform.<domain>` |
-| external-secrets | external-secrets | 1 | External Secrets Operator |
-| cluster-secret-store | external-secrets | 2 | ClusterSecretStore pointing to AWS Secrets Manager |
-| reloader | reloader | 1 | Stakater Reloader (watches Secrets/ConfigMaps) |
-| aws-load-balancer-controller | kube-system | 1 | ALB Ingress controller |
-| external-dns | external-dns | 1 | Route53 DNS records from Ingress/Service |
-| cluster-autoscaler | kube-system | 1 | Scales managed node group on pending pods |
-| karpenter | karpenter | 2 | Karpenter controller (workload node provisioner) |
-| karpenter-nodepools | karpenter | 3 | EC2NodeClass + NodePool for `t3a.medium`/`c6a.large` |
-| metrics-server | kube-system | — | CPU/memory metrics for HPA |
-| prometheus-crds | monitoring | 0 | Prometheus Operator CRDs (pre-installed before stack) |
-| prometheus | monitoring | 4 | kube-prometheus-stack |
-| prometheus-adapter | monitoring | 5 | Custom metrics API bridge (enables custom-metric HPA) |
-| thanos-objstore-secret | monitoring | 3 | S3 objstore Secret injected from cluster annotations |
-| thanos | monitoring | 6 | Thanos Query, Compactor, StoreGateway |
-| grafana-admin-secret | monitoring | 3 | Syncs Grafana admin credentials from Secrets Manager |
-| grafana-dashboard | monitoring | 2 | SimpleTimeService dashboard ConfigMap |
-| simple-time-service-alerts | monitoring | 5 | PrometheusRule CRD |
-| alertmanager-webhook-secret | monitoring | 3 | Syncs Slack webhook URL from Secrets Manager |
-| alertmanager-slack | monitoring | 4 | AlertmanagerConfig CRD |
-| loki | logging | 3 | Loki log store |
-| fluent-bit | logging | 4 | Log collector DaemonSet |
-| grafana-loki-datasource | monitoring | 4 | Loki datasource ConfigMap |
-| simple-time-service | simple-time-service | 4 | SimpleTimeService Helm chart (HPA, ALB Ingress) |
+| App | Namespace | Project | Sync wave | Purpose |
+|-----|-----------|---------|-----------|---------|
+| root-app | argocd | platform | — | Discovers all other apps |
+| argocd-self | argocd | platform | — | ArgoCD self-managed via Helm |
+| argocd-admin-secret | argocd | platform | 3 | Syncs ArgoCD admin password from Secrets Manager |
+| argocd-ingress | argocd | platform | 2 | ALB Ingress at `argocd.platform.<domain>` |
+| external-secrets | external-secrets | platform | 1 | External Secrets Operator |
+| cluster-secret-store | external-secrets | platform | 2 | ClusterSecretStore pointing to AWS Secrets Manager |
+| reloader | reloader | platform | 1 | Stakater Reloader (watches Secrets/ConfigMaps) |
+| aws-load-balancer-controller | kube-system | platform | 1 | ALB Ingress controller |
+| external-dns | external-dns | platform | 1 | Route53 DNS records from Ingress/Service |
+| cluster-autoscaler | kube-system | platform | 1 | Scales managed node group on pending pods |
+| karpenter | karpenter | platform | 2 | Karpenter controller (workload node provisioner) |
+| karpenter-nodepools | karpenter | platform | 3 | EC2NodeClass + NodePool for `t3a.medium`/`c6a.large` |
+| metrics-server | kube-system | platform | — | CPU/memory metrics for HPA |
+| prometheus-crds | monitoring | observability | 0 | Prometheus Operator CRDs (pre-installed before stack) |
+| prometheus | monitoring | observability | 4 | kube-prometheus-stack |
+| prometheus-adapter | monitoring | observability | 5 | Custom metrics API bridge (enables custom-metric HPA) |
+| thanos-objstore-secret | monitoring | observability | 3 | S3 objstore Secret injected from cluster annotations |
+| thanos | monitoring | observability | 6 | Thanos Query, Compactor, StoreGateway |
+| grafana-admin-secret | monitoring | observability | 3 | Syncs Grafana admin credentials from Secrets Manager |
+| grafana-dashboard | monitoring | observability | 2 | SimpleTimeService dashboard ConfigMap |
+| simple-time-service-alerts | monitoring | observability | 5 | PrometheusRule CRD |
+| alertmanager-webhook-secret | monitoring | observability | 3 | Syncs Slack webhook URL from Secrets Manager |
+| alertmanager-slack | monitoring | observability | 4 | AlertmanagerConfig CRD |
+| loki | logging | observability | 3 | Loki log store |
+| fluent-bit | logging | observability | 4 | Log collector DaemonSet |
+| grafana-loki-datasource | monitoring | observability | 4 | Loki datasource ConfigMap |
+| simple-time-service | simple-time-service | workloads | 4 | SimpleTimeService Helm chart (HPA, ALB Ingress) |
+
+---
+
+## ArgoCD Projects
+
+All ApplicationSets are scoped to one of three AppProjects defined in `gitops/argocd/projects/`. Projects enforce which source repos, destination namespaces, and cluster-scoped resource kinds each group of apps is allowed to use — preventing a misconfigured or compromised app from deploying to an unintended namespace or installing arbitrary cluster resources.
+
+| Project | File | Allowed namespaces | Cluster resources | Covers |
+|---------|------|--------------------|-------------------|--------|
+| `platform` | `platform-project.yaml` | `argocd`, `kube-system`, `karpenter`, `external-secrets`, `external-dns`, `reloader` | All (`*/*`) — infra tools install CRDs and cluster RBAC | ArgoCD, bootstrap, networking, autoscaling, secrets |
+| `observability` | `observability-project.yaml` | `monitoring`, `logging` | `CustomResourceDefinition`, `ClusterRole`, `ClusterRoleBinding` | Prometheus, Grafana, Thanos, Loki, Fluent Bit, alerts |
+| `workloads` | `workloads-project.yaml` | `simple-time-service` | None | Application workloads |
+
+**Bootstrap order:** `bootstrap.sh` applies all project manifests from `gitops/argocd/projects/` before applying `root-app.yaml`, ensuring every project exists before ArgoCD tries to sync an app that references it. After bootstrap, project changes pushed to `main` are automatically reconciled by the root app.
 
 ---
 

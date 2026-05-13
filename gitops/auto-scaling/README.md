@@ -89,7 +89,34 @@ Provisions **workload nodes** on demand when pods with `nodeSelector: {app: work
 | Interruption queue | `<cluster-name>-karpenter-interruption` (SQS) |
 | Pod Identity | Configured by Terraform, not IRSA |
 
-The interruption queue receives EC2 spot interruption notices, rebalance recommendations, and scheduled maintenance events, allowing Karpenter to drain nodes gracefully before termination.
+### Interruption handling
+
+Karpenter watches an SQS queue for EC2 lifecycle events and proactively drains affected nodes before they terminate, giving workloads time to reschedule gracefully.
+
+The queue and EventBridge rules are created by Terraform via `enable_spot_termination = true` in `terraform/karpenter.tf`. Despite the flag name, the rules cover all capacity types — not just spot:
+
+| EventBridge rule | Applies to | What Karpenter does |
+|-----------------|------------|---------------------|
+| EC2 Spot Instance Interruption Warning | Spot nodes | Cordons and drains node 2 minutes before termination |
+| EC2 Rebalance Recommendation | Spot + on-demand | Voluntarily replaces the node to improve availability |
+| EC2 Instance State-change Notification | All nodes | Detects unexpected stops/terminations and cleans up |
+| AWS Health Events (scheduled maintenance / retirement) | All nodes | Drains node ahead of the maintenance window |
+
+Since this cluster uses **on-demand only**, spot interruptions never fire — but rebalance recommendations, state-change notifications, and AWS Health retirement events all apply and are actively handled.
+
+The queue name is injected into the Karpenter Helm release at deploy time from the ArgoCD cluster secret annotation `cluster-name`:
+
+```yaml
+settings:
+  interruptionQueue: "<cluster-name>-karpenter-interruption"
+```
+
+Verify the queue exists and EventBridge rules are wired up:
+
+```bash
+aws sqs get-queue-url --queue-name <cluster-name>-karpenter-interruption
+aws events list-rules --name-prefix "karpenter" --query "Rules[].Name"
+```
 
 ### NodePool and EC2NodeClass
 

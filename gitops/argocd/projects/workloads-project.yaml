@@ -1,0 +1,49 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: workloads
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: workload
+spec:
+  description: Application workloads deployed to the cluster
+
+  sourceRepos:
+    - https://github.com/Beem0807/eks-gitops-platform.git
+
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: simple-time-service
+
+  # Workloads deploy only namespace-scoped resources — no cluster-level access
+  clusterResourceWhitelist: []
+
+  # Explicit whitelist of namespace-scoped resource types the workload charts are allowed to create.
+  # namespaceResourceWhitelist is unset on platform/observability because those Helm charts introduce
+  # many CRD-backed types that are impractical to enumerate without causing surprise sync failures.
+  namespaceResourceWhitelist:
+    - group: apps
+      kind: Deployment
+    - group: ""
+      kind: Service
+    - group: ""
+      kind: ServiceAccount
+    - group: ""
+      kind: ConfigMap
+    - group: ""
+      kind: Secret
+    - group: networking.k8s.io
+      kind: Ingress
+    - group: networking.k8s.io
+      kind: NetworkPolicy
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+    - group: policy
+      kind: PodDisruptionBudget
+    - group: monitoring.coreos.com
+      kind: ServiceMonitor
+
+  orphanedResources:
+    warn: true

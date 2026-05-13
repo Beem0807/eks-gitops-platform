@@ -29,7 +29,7 @@ spec:
         app.kubernetes.io/managed-by: argocd
         app.kubernetes.io/component: autoscaling
     spec:
-      project: default
+      project: platform
       source:
         repoURL: https://kubernetes.github.io/autoscaler
         chart: cluster-autoscaler
