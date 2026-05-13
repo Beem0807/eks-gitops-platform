@@ -1,92 +1,147 @@
+# -- Override the full resource name used by all chart objects
 fullnameOverride: simple-time-service
 
+# -- Number of pod replicas
 replicaCount: 2
 
 image:
+  # -- Container image repository
   repository: docker.io/nabeemdev/simple-time-service
+  # -- Image tag (`v1` = baseline, `latest` = metrics-enabled build)
   tag: v1
+  # -- Image pull policy
   pullPolicy: IfNotPresent
 
 service:
+  # -- Kubernetes Service type
   type: ClusterIP
+  # -- Service port exposed to the cluster
   port: 80
+  # -- Container port the service forwards traffic to
   targetPort: 8080
+  # -- Extra annotations to add to the Service
   annotations: {}
 
 ingress:
+  # -- Create an Ingress resource
   enabled: false
+  # -- Ingress class name (e.g. `alb`)
   className: ""
+  # -- Ingress annotations (e.g. ALB scheme, target type)
   annotations: {}
+  # -- List of `{host, paths[]}` entries
   hosts: []
+  # -- TLS configuration for the Ingress
   tls: []
 
 resources:
   requests:
+    # -- CPU request
     cpu: 100m
+    # -- Memory request
     memory: 128Mi
   limits:
+    # -- CPU limit
     cpu: 250m
+    # -- Memory limit
     memory: 256Mi
 
 livenessProbe:
+  # -- Liveness probe HTTP path
   path: /health
+  # -- Seconds before the first liveness probe fires
   initialDelaySeconds: 5
+  # -- Liveness probe polling interval in seconds
   periodSeconds: 10
 
 readinessProbe:
+  # -- Readiness probe HTTP path
   path: /health
+  # -- Seconds before the first readiness probe fires
   initialDelaySeconds: 3
+  # -- Readiness probe polling interval in seconds
   periodSeconds: 5
 
 podSecurityContext:
+  # -- Enforce that the container runs as a non-root user
   runAsNonRoot: true
+  # -- UID for the container process
   runAsUser: 10001
+  # -- GID for the container process
   runAsGroup: 10001
+  # -- GID applied to volume mounts
   fsGroup: 10001
 
 securityContext:
+  # -- Prevent the container from gaining new privileges
   allowPrivilegeEscalation: false
+  # -- Mount the root filesystem read-only
   readOnlyRootFilesystem: true
   capabilities:
+    # -- Linux capabilities to drop from the container
     drop:
       - ALL
 
 serviceAccount:
+  # -- Create a dedicated ServiceAccount for the deployment
   create: false
+  # -- ServiceAccount name; auto-generated if empty and `create` is true
   name: ""
+  # -- Annotations added to the ServiceAccount
   annotations: {}
 
 hpa:
+  # -- Create a HorizontalPodAutoscaler (requires `metrics-server`)
   enabled: false
+  # -- Minimum number of replicas the HPA will maintain
   minReplicas: 2
+  # -- Maximum number of replicas the HPA may scale to
   maxReplicas: 10
+  # -- Target average CPU utilization across all pods (percent)
   targetCPUAverageUtilization: 70
   scaleDown:
-    stabilizationWindowSeconds: 300  # wait 5m before scaling down
-    pods: 1                          # remove at most 1 pod per period
+    # -- Seconds to wait after load drops before scaling down
+    stabilizationWindowSeconds: 300
+    # -- Maximum pods to remove per scale-down period
+    pods: 1
+    # -- Scale-down policy period length in seconds
     periodSeconds: 60
   scaleUp:
-    stabilizationWindowSeconds: 0    # scale up immediately
-    pods: 2                          # add at most 2 pods per period
+    # -- Seconds to wait before scaling up (0 = immediate)
+    stabilizationWindowSeconds: 0
+    # -- Maximum pods to add per scale-up period
+    pods: 2
+    # -- Scale-up policy period length in seconds
     periodSeconds: 30
 
 networkPolicy:
+  # -- Create a NetworkPolicy that restricts ingress and egress to labelled pods
   enabled: false
 
 pdb:
+  # -- Create a PodDisruptionBudget
   enabled: true
+  # -- Minimum pods that must remain available during voluntary disruptions
   minAvailable: 1
 
 serviceMonitor:
+  # -- Create a Prometheus ServiceMonitor (requires Prometheus Operator)
   enabled: false
+  # -- Prometheus scrape interval
   interval: 30s
+  # -- Metrics endpoint path
   path: /metrics
+  # -- Extra labels added to the ServiceMonitor (used to target a specific Prometheus instance)
   labels: {}
 
+# -- Extra annotations added to every pod
 podAnnotations: {}
 
+# -- Node selector constraints for pod scheduling
 nodeSelector: {}
 
+# -- Pod tolerations
 tolerations: []
 
+# -- Pod affinity/anti-affinity rules
 affinity: {}

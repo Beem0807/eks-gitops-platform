@@ -1,0 +1,11 @@
+# -- List of arbitrary Kubernetes resource manifests to deploy.
+# Each entry must be a valid Kubernetes object (with `apiVersion`, `kind`, and `metadata`).
+# @default -- `[]` (no resources deployed by default)
+resources: []
+# - apiVersion: v1
+#   kind: ConfigMap
+#   metadata:
+#     name: example-config
+#     namespace: default
+#   data:
+#     key: value

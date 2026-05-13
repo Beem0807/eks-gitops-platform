@@ -1,10 +1,10 @@
-# raw
+# {{ template "chart.name" . }}
 
-Deploy arbitrary Kubernetes resources via Helm
+{{ template "chart.description" . }}
 
 It exists so that every resource in the platform — including plain ConfigMaps — can be deployed through the same ArgoCD ApplicationSet pattern without needing a separate raw manifest tracked outside of `gitops/`.
 
-![Version: 0.1.0](https://img.shields.io/badge/Version-0.1.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square)
+{{ template "chart.badgesSection" . }}
 
 ---
 
@@ -13,10 +13,10 @@ It exists so that every resource in the platform — including plain ConfigMaps 
 `templates/resources.yaml` loops over `.Values.resources` and renders each entry as a top-level YAML document:
 
 ```yaml
-{{- range .Values.resources }}
+{{`{{- range .Values.resources }}
 ---
 {{ toYaml . }}
-{{- end }}
+{{- end }}`}}
 ```
 
 Anything that is valid Kubernetes YAML can go in the `resources:` list.
@@ -47,11 +47,7 @@ source:
 
 ---
 
-## Values
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| resources | list | `[]` (no resources deployed by default) | List of arbitrary Kubernetes resource manifests to deploy. Each entry must be a valid Kubernetes object (with `apiVersion`, `kind`, and `metadata`). |
+{{ template "chart.valuesSection" . }}
 
 ---
 

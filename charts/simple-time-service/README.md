@@ -1,8 +1,10 @@
-# Helm Chart - simple-time-service
+# simple-time-service
 
-The chart at `charts/simple-time-service/` is the recommended way to deploy the service to Kubernetes. It provides configurable replicas, resource limits, health probes, a PodDisruptionBudget, HPA-based autoscaling, and a full set of security-context defaults - all tuneable through `values.yaml`.
+Helm chart for the simple-time-service app
 
 > The raw manifest at `k8s/microservice.yaml` is a minimal alternative for quickly testing the service. The Helm chart is the configurable deployment used by ArgoCD in this platform.
+
+![Version: 0.1.0](https://img.shields.io/badge/Version-0.1.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1](https://img.shields.io/badge/AppVersion-v1-informational?style=flat-square)
 
 ---
 
@@ -56,66 +58,65 @@ kubectl delete namespace simple-time-service
 
 ---
 
-## Chart values
+## Values
 
-All values can be overridden with `--set key=value` or a custom values file (`-f my-values.yaml`).
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `fullnameOverride` | `simple-time-service` | Override the full resource name |
-| `replicaCount` | `2` | Number of pod replicas |
-| `image.repository` | `docker.io/nabeemdev/simple-time-service` | Container image repository |
-| `image.tag` | `v1` | Image tag (`v1` = baseline, `latest` = metrics-enabled build) |
-| `image.pullPolicy` | `IfNotPresent` | Image pull policy |
-| `service.type` | `ClusterIP` | Kubernetes Service type |
-| `service.port` | `80` | Service port |
-| `service.targetPort` | `8080` | Container port |
-| `resources.requests.cpu` | `100m` | CPU request |
-| `resources.requests.memory` | `128Mi` | Memory request |
-| `resources.limits.cpu` | `250m` | CPU limit |
-| `resources.limits.memory` | `256Mi` | Memory limit |
-| `livenessProbe.path` | `/health` | Liveness probe HTTP path |
-| `livenessProbe.initialDelaySeconds` | `5` | Liveness probe initial delay |
-| `livenessProbe.periodSeconds` | `10` | Liveness probe interval |
-| `readinessProbe.path` | `/health` | Readiness probe HTTP path |
-| `readinessProbe.initialDelaySeconds` | `3` | Readiness probe initial delay |
-| `readinessProbe.periodSeconds` | `5` | Readiness probe interval |
-| `podSecurityContext.runAsNonRoot` | `true` | Enforce non-root at pod level |
-| `podSecurityContext.runAsUser` | `10001` | UID for the container process |
-| `podSecurityContext.runAsGroup` | `10001` | GID for the container process |
-| `podSecurityContext.fsGroup` | `10001` | GID for volume mounts |
-| `securityContext.allowPrivilegeEscalation` | `false` | Prevent privilege escalation |
-| `securityContext.readOnlyRootFilesystem` | `true` | Read-only root filesystem |
-| `securityContext.capabilities.drop` | `["ALL"]` | Drop all Linux capabilities |
-| `serviceAccount.create` | `false` | Create a dedicated ServiceAccount |
-| `serviceAccount.name` | `""` | ServiceAccount name (if not auto-generated) |
-| `serviceAccount.annotations` | `{}` | Annotations for the ServiceAccount |
-| `networkPolicy.enabled` | `false` | Create a NetworkPolicy restricting ingress and egress |
-| `hpa.enabled` | `false` | Create a HorizontalPodAutoscaler (requires `metrics-server`) |
-| `hpa.minReplicas` | `2` | Minimum number of replicas |
-| `hpa.maxReplicas` | `10` | Maximum number of replicas |
-| `hpa.targetCPUAverageUtilization` | `70` | Target average CPU utilization across pods |
-| `hpa.scaleDown.stabilizationWindowSeconds` | `300` | Seconds to wait after load drops before scaling down |
-| `hpa.scaleDown.pods` | `1` | Max pods to remove per scale-down period |
-| `hpa.scaleDown.periodSeconds` | `60` | Scale-down policy period length in seconds |
-| `hpa.scaleUp.stabilizationWindowSeconds` | `0` | Seconds to wait before scaling up (0 = immediate) |
-| `hpa.scaleUp.pods` | `2` | Max pods to add per scale-up period |
-| `hpa.scaleUp.periodSeconds` | `30` | Scale-up policy period length in seconds |
-| `pdb.enabled` | `true` | Create a PodDisruptionBudget |
-| `pdb.minAvailable` | `1` | Minimum pods available during disruptions |
-| `ingress.enabled` | `false` | Create an Ingress resource |
-| `ingress.className` | `""` | Ingress class name (e.g. `alb`) |
-| `ingress.annotations` | `{}` | Ingress annotations (e.g. ALB scheme, target type) |
-| `ingress.hosts` | `[]` | List of `{host, paths[]}` entries |
-| `ingress.tls` | `[]` | TLS configuration for the Ingress |
-| `serviceMonitor.enabled` | `false` | Create a Prometheus `ServiceMonitor` (requires Prometheus Operator) |
-| `serviceMonitor.interval` | `30s` | Scrape interval |
-| `serviceMonitor.path` | `/metrics` | Metrics endpoint path |
-| `serviceMonitor.labels` | `{}` | Extra labels added to the `ServiceMonitor` |
-| `podAnnotations` | `{}` | Extra pod annotations |
-| `nodeSelector` | `{}` | Node selector constraints |
-| `tolerations` | `[]` | Pod tolerations |
-| `affinity` | `{}` | Pod affinity/anti-affinity rules |
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| affinity | object | `{}` | Pod affinity/anti-affinity rules |
+| fullnameOverride | string | `"simple-time-service"` | Override the full resource name used by all chart objects |
+| hpa.enabled | bool | `false` | Create a HorizontalPodAutoscaler (requires `metrics-server`) |
+| hpa.maxReplicas | int | `10` | Maximum number of replicas the HPA may scale to |
+| hpa.minReplicas | int | `2` | Minimum number of replicas the HPA will maintain |
+| hpa.scaleDown.periodSeconds | int | `60` | Scale-down policy period length in seconds |
+| hpa.scaleDown.pods | int | `1` | Maximum pods to remove per scale-down period |
+| hpa.scaleDown.stabilizationWindowSeconds | int | `300` | Seconds to wait after load drops before scaling down |
+| hpa.scaleUp.periodSeconds | int | `30` | Scale-up policy period length in seconds |
+| hpa.scaleUp.pods | int | `2` | Maximum pods to add per scale-up period |
+| hpa.scaleUp.stabilizationWindowSeconds | int | `0` | Seconds to wait before scaling up (0 = immediate) |
+| hpa.targetCPUAverageUtilization | int | `70` | Target average CPU utilization across all pods (percent) |
+| image.pullPolicy | string | `"IfNotPresent"` | Image pull policy |
+| image.repository | string | `"docker.io/nabeemdev/simple-time-service"` | Container image repository |
+| image.tag | string | `"v1"` | Image tag (`v1` = baseline, `latest` = metrics-enabled build) |
+| ingress.annotations | object | `{}` | Ingress annotations (e.g. ALB scheme, target type) |
+| ingress.className | string | `""` | Ingress class name (e.g. `alb`) |
+| ingress.enabled | bool | `false` | Create an Ingress resource |
+| ingress.hosts | list | `[]` | List of `{host, paths[]}` entries |
+| ingress.tls | list | `[]` | TLS configuration for the Ingress |
+| livenessProbe.initialDelaySeconds | int | `5` | Seconds before the first liveness probe fires |
+| livenessProbe.path | string | `"/health"` | Liveness probe HTTP path |
+| livenessProbe.periodSeconds | int | `10` | Liveness probe polling interval in seconds |
+| networkPolicy.enabled | bool | `false` | Create a NetworkPolicy that restricts ingress and egress to labelled pods |
+| nodeSelector | object | `{}` | Node selector constraints for pod scheduling |
+| pdb.enabled | bool | `true` | Create a PodDisruptionBudget |
+| pdb.minAvailable | int | `1` | Minimum pods that must remain available during voluntary disruptions |
+| podAnnotations | object | `{}` | Extra annotations added to every pod |
+| podSecurityContext.fsGroup | int | `10001` | GID applied to volume mounts |
+| podSecurityContext.runAsGroup | int | `10001` | GID for the container process |
+| podSecurityContext.runAsNonRoot | bool | `true` | Enforce that the container runs as a non-root user |
+| podSecurityContext.runAsUser | int | `10001` | UID for the container process |
+| readinessProbe.initialDelaySeconds | int | `3` | Seconds before the first readiness probe fires |
+| readinessProbe.path | string | `"/health"` | Readiness probe HTTP path |
+| readinessProbe.periodSeconds | int | `5` | Readiness probe polling interval in seconds |
+| replicaCount | int | `2` | Number of pod replicas |
+| resources.limits.cpu | string | `"250m"` | CPU limit |
+| resources.limits.memory | string | `"256Mi"` | Memory limit |
+| resources.requests.cpu | string | `"100m"` | CPU request |
+| resources.requests.memory | string | `"128Mi"` | Memory request |
+| securityContext.allowPrivilegeEscalation | bool | `false` | Prevent the container from gaining new privileges |
+| securityContext.capabilities.drop | list | `["ALL"]` | Linux capabilities to drop from the container |
+| securityContext.readOnlyRootFilesystem | bool | `true` | Mount the root filesystem read-only |
+| service.annotations | object | `{}` | Extra annotations to add to the Service |
+| service.port | int | `80` | Service port exposed to the cluster |
+| service.targetPort | int | `8080` | Container port the service forwards traffic to |
+| service.type | string | `"ClusterIP"` | Kubernetes Service type |
+| serviceAccount.annotations | object | `{}` | Annotations added to the ServiceAccount |
+| serviceAccount.create | bool | `false` | Create a dedicated ServiceAccount for the deployment |
+| serviceAccount.name | string | `""` | ServiceAccount name; auto-generated if empty and `create` is true |
+| serviceMonitor.enabled | bool | `false` | Create a Prometheus ServiceMonitor (requires Prometheus Operator) |
+| serviceMonitor.interval | string | `"30s"` | Prometheus scrape interval |
+| serviceMonitor.labels | object | `{}` | Extra labels added to the ServiceMonitor (used to target a specific Prometheus instance) |
+| serviceMonitor.path | string | `"/metrics"` | Metrics endpoint path |
+| tolerations | list | `[]` | Pod tolerations |
 
 ---
 
@@ -136,4 +137,18 @@ Requires Prometheus Operator to be installed on the cluster.
 helm install simple-time-service charts/simple-time-service \
   --set image.tag=latest \
   --set serviceMonitor.enabled=true
+```
+
+---
+
+## Updating this README
+
+This file is auto-generated by [helm-docs](https://github.com/norwoodj/helm-docs). Do **not** edit `README.md` directly — edit `README.md.gotmpl` for structural changes or annotate `values.yaml` keys with `# --` comments to update the values table.
+
+**Requires:** `helm-docs >= 1.11` — install from the [official guide](https://github.com/norwoodj/helm-docs#installation).
+
+Regenerate after any change:
+
+```bash
+helm-docs --chart-search-root charts/
 ```
