@@ -97,6 +97,24 @@ spec:
                   operator: Equal
                   value: core
                   effect: NoSchedule
+
+            cleanupJobs:
+              admissionReports:
+                nodeSelector:
+                  app: core
+                tolerations:
+                  - key: app
+                    operator: Equal
+                    value: core
+                    effect: NoSchedule
+              clusterAdmissionReports:
+                nodeSelector:
+                  app: core
+                tolerations:
+                  - key: app
+                    operator: Equal
+                    value: core
+                    effect: NoSchedule
       destination:
         server: '{{.server}}'
         namespace: security
