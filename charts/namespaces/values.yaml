@@ -1,0 +1,23 @@
+global:
+  # -- Labels applied to every namespace. Per-namespace labels are merged on top — per-namespace wins on key conflicts.
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+  # -- Annotations applied to every namespace. Per-namespace annotations are merged on top.
+  annotations: {}
+  # -- Default ResourceQuota applied to every namespace unless overridden at the namespace level. Leave empty to skip quota creation.
+  # @default -- `{}` (no quota by default)
+  resourceQuota: {}
+  # resourceQuota:
+  #   requests.cpu: "4"
+  #   requests.memory: 8Gi
+  #   limits.cpu: "8"
+  #   limits.memory: 16Gi
+
+# -- List of namespaces to create. Each entry supports per-namespace `labels`, `annotations`, and `resourceQuota` overrides.
+# @default -- `[]` (no namespaces created by default)
+namespaces: []
+# - name: my-namespace
+#   labels: {}          # merged on top of global.labels
+#   annotations: {}     # merged on top of global.annotations
+#   resourceQuota: {}   # overrides global.resourceQuota entirely if non-empty

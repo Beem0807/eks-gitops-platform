@@ -1,0 +1,17 @@
+{{- range .Values.namespaces }}
+{{- $labels := merge (deepCopy (default dict .labels)) $.Values.global.labels }}
+{{- $annotations := merge (deepCopy (default dict .annotations)) $.Values.global.annotations }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .name }}
+  {{- if $labels }}
+  labels:
+    {{- toYaml $labels | nindent 4 }}
+  {{- end }}
+  {{- if $annotations }}
+  annotations:
+    {{- toYaml $annotations | nindent 4 }}
+  {{- end }}
+---
+{{- end }}

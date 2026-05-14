@@ -1,0 +1,14 @@
+{{- range .Values.namespaces }}
+{{- $quota := default $.Values.global.resourceQuota .resourceQuota }}
+{{- if $quota }}
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: default
+  namespace: {{ .name }}
+spec:
+  hard:
+    {{- toYaml $quota | nindent 4 }}
+---
+{{- end }}
+{{- end }}

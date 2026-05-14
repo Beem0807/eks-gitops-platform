@@ -15,12 +15,15 @@ gitops/
 ├── argocd/
 │   ├── projects/
 │   │   ├── bootstrap-project.yaml              # AppProject - owns root-app only, minimal scope
+│   │   ├── namespaces-project.yaml             # AppProject - cluster namespace lifecycle
 │   │   ├── platform-project.yaml               # AppProject - ArgoCD, infra, networking, secrets
 │   │   ├── observability-project.yaml          # AppProject - monitoring, logging, alerting
 │   │   └── workloads-project.yaml              # AppProject - application workloads
 │   ├── argocd.yaml                             # Application - ArgoCD self-managed via Helm
 │   ├── argocd-admin-secret.yaml                # ApplicationSet - ExternalSecret for ArgoCD admin password (wave 5)
 │   └── argocd-ingress.yaml                     # ApplicationSet - ALB Ingress at argocd.platform.<domain> (wave 6)
+├── namespaces/
+│   └── cluster-namespaces.yaml                 # ApplicationSet - creates all cluster namespaces (wave -1)
 ├── app/
 │   └── simple-time-service/
 │       └── simple-time-service.yaml            # ApplicationSet - Helm deploy with ALB Ingress (wave 8)
@@ -168,6 +171,7 @@ Any push to `main` affecting `gitops/` or `charts/` is automatically applied wit
 |-----|-----------|---------|-----------|---------|
 | root-app | argocd | bootstrap | — | Discovers all other apps |
 | argocd-self | argocd | platform | — | ArgoCD self-managed via Helm |
+| cluster-namespaces | — | namespaces | -1 | Creates all cluster namespaces before any app deploys |
 | prometheus-crds | monitoring | observability | 0 | Prometheus Operator CRDs (pre-installed before stack) |
 | external-secrets | external-secrets | platform | 1 | External Secrets Operator |
 | aws-ebs-csi-driver | kube-system | platform | 1 | EBS volumes + `gp3` default StorageClass |
@@ -205,6 +209,7 @@ ArgoCD advances through sync waves sequentially, waiting for all resources in th
 
 | Wave | Components | Why this boundary |
 |------|-----------|-------------------|
+| -1 | **cluster-namespaces** | All namespaces created before any app attempts to deploy into them |
 | 0 | Prometheus CRDs | CRDs must exist before any resource of those types is applied |
 | 1 | ESO, EBS CSI, Reloader, Cluster Autoscaler | Core infrastructure with no cross-dependencies |
 | 2 | **LBC**, ExternalDNS | Network controllers given their own wave so the LBC admission webhook cert has time to propagate before any Ingress is applied |
@@ -223,11 +228,12 @@ ArgoCD advances through sync waves sequentially, waiting for all resources in th
 
 ## ArgoCD Projects
 
-All ApplicationSets are scoped to one of three AppProjects defined in `gitops/argocd/projects/`. Projects enforce which source repos, destination namespaces, and cluster-scoped resource kinds each group of apps is allowed to use — preventing a misconfigured or compromised app from deploying to an unintended namespace or installing arbitrary cluster resources.
+All ApplicationSets are scoped to one of five AppProjects defined in `gitops/argocd/projects/`. Projects enforce which source repos, destination namespaces, and cluster-scoped resource kinds each group of apps is allowed to use — preventing a misconfigured or compromised app from deploying to an unintended namespace or installing arbitrary cluster resources.
 
 | Project | File | Allowed namespaces | Cluster resources | Covers |
 |---------|------|--------------------|-------------------|--------|
 | `bootstrap` | `bootstrap-project.yaml` | `argocd` | None — root-app only deploys namespace-scoped ArgoCD resources | root-app only |
+| `namespaces` | `namespaces-project.yaml` | `*` | `Namespace` only | cluster-namespaces (creates namespaces + ResourceQuotas) |
 | `platform` | `platform-project.yaml` | `argocd`, `kube-system`, `karpenter`, `external-secrets`, `external-dns`, `reloader`, `velero`, `kube-node-lease` | All (`*/*`) — infra tools install CRDs and cluster RBAC | ArgoCD self-management, networking, autoscaling, secrets, storage, backup |
 | `observability` | `observability-project.yaml` | `monitoring`, `logging`, `kube-system` | `CustomResourceDefinition`, `ClusterRole`, `ClusterRoleBinding` | Prometheus, Grafana, Thanos, Loki, Fluent Bit, alerts |
 | `workloads` | `workloads-project.yaml` | `simple-time-service` | None | Application workloads |

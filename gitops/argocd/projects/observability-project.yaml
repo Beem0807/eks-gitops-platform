@@ -34,8 +34,6 @@ spec:
   # - Prometheus Operator: CRDs, ClusterRole/Binding, admission webhooks
   # - Prometheus Adapter: APIService to register custom.metrics.k8s.io with the aggregation layer
   clusterResourceWhitelist:
-    - group: ""
-      kind: Namespace
     - group: apiextensions.k8s.io
       kind: CustomResourceDefinition
     - group: rbac.authorization.k8s.io

@@ -28,7 +28,7 @@ The `gitops/monitoring/` directory deploys the full observability stack via Argo
 | Thanos StoreGateway | Serves historical blocks from S3 to Thanos Query; 5Gi EBS PVC (`gp3`) |
 | kube-state-metrics | Kubernetes object/state metrics (Deployments, Pods, resource requests) |
 
-All components land in the `monitoring` namespace, created automatically by ArgoCD via `CreateNamespace=true`.
+All components land in the `monitoring` namespace, created by the `cluster-namespaces` app (wave -1) before any observability app syncs.
 
 Grafana shares the `platform-observability` ALB Ingress group with ArgoCD and SimpleTimeService. Prometheus and Alertmanager have no ingress and are not publicly exposed.
 

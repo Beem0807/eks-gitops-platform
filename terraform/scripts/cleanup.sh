@@ -147,14 +147,11 @@ cleanup_kubernetes_resources() {
     --ignore-not-found=true \
     --wait=false || true
 
-  echo "Deleting application namespaces..."
-  kubectl delete namespace reloader --ignore-not-found=true --wait=false || true
-  kubectl delete namespace monitoring --ignore-not-found=true --wait=false || true
-  kubectl delete namespace logging --ignore-not-found=true --wait=false || true
-  kubectl delete namespace external-secrets --ignore-not-found=true --wait=false || true
-  kubectl delete namespace external-dns --ignore-not-found=true --wait=false || true
-  kubectl delete namespace karpenter --ignore-not-found=true --wait=false || true
-  kubectl delete namespace velero --ignore-not-found=true --wait=false || true
+  echo "Deleting platform-managed namespaces..."
+  kubectl delete namespace \
+    -l app.kubernetes.io/part-of=eks-gitops-platform \
+    --ignore-not-found=true \
+    --wait=false || true
 
   echo "Deleting Argo CD namespace..."
   kubectl delete namespace "$ARGOCD_NS" \
