@@ -55,9 +55,12 @@ spec:
                       period: 24h
               storage:
                 type: s3
+                bucketNames:
+                  chunks: {{ .values.lokiBucketName }}
+                  ruler: {{ .values.lokiBucketName }}
+                  admin: {{ .values.lokiBucketName }}
                 s3:
                   region: {{ .values.region }}
-                  bucketnames: {{ .values.lokiBucketName }}
                   s3ForcePathStyle: false
               rulerConfig: {}
               containerSecurityContext:
