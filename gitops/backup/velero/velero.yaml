@@ -80,7 +80,8 @@ spec:
 
             kubectl:
               image:
-                tag: "latest"
+                repository: docker.io/alpine/k8s
+                tag: "1.34.7"
 
             metrics:
               enabled: true
