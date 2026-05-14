@@ -80,6 +80,12 @@ spec:
               replicas: 1
               persistence:
                 enabled: false
+              extraVolumes:
+                - name: loki-data
+                  emptyDir: {}
+              extraVolumeMounts:
+                - name: loki-data
+                  mountPath: /var/loki
             
             ruler:
               enabled: false
