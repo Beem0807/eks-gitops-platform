@@ -50,7 +50,7 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 | [gitops/monitoring/README.md](gitops/monitoring/README.md) | Prometheus, Grafana, Thanos, Prometheus Adapter, ServiceMonitor, EBS persistence |
 | [gitops/alerts/README.md](gitops/alerts/README.md) | PrometheusRules, Slack alerting, silencing, grouping |
 | [gitops/logs/README.md](gitops/logs/README.md) | Loki S3 backend, Fluent Bit, log querying in Grafana |
-| [gitops/security/README.md](gitops/security/README.md) | Kyverno policies, Policy Reporter UI, basic auth, inspecting policy reports |
+| [gitops/security/README.md](gitops/security/README.md) | Kyverno policies, Policy Reporter UI, inspecting policy reports |
 
 ---
 
