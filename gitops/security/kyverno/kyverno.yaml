@@ -141,12 +141,29 @@ spec:
 
             policyReportsCleanup:
               image:
-                registry: registry.bitnami.com
+                registry: public.ecr.aws
               tolerations:
                 - key: app
                   operator: Equal
                   value: core
                   effect: NoSchedule
+
+            webhooksCleanup:
+              image:
+                registry: public.ecr.aws
+              tolerations:
+                - key: app
+                  operator: Equal
+                  value: core
+                  effect: NoSchedule
+
+            crds:
+              migration:
+                tolerations:
+                  - key: app
+                    operator: Equal
+                    value: core
+                    effect: NoSchedule
       destination:
         server: '{{.server}}'
         namespace: security
