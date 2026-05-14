@@ -100,7 +100,7 @@ spec:
             cleanupJobs:
               admissionReports:
                 image:
-                  registry: registry.bitnami.com
+                  registry: public.ecr.aws
                 tolerations:
                   - key: app
                     operator: Equal
@@ -108,7 +108,7 @@ spec:
                     effect: NoSchedule
               clusterAdmissionReports:
                 image:
-                  registry: registry.bitnami.com
+                  registry: public.ecr.aws
                 tolerations:
                   - key: app
                     operator: Equal
@@ -116,7 +116,7 @@ spec:
                     effect: NoSchedule
               updateRequests:
                 image:
-                  registry: registry.bitnami.com
+                  registry: public.ecr.aws
                 tolerations:
                   - key: app
                     operator: Equal
@@ -124,7 +124,7 @@ spec:
                     effect: NoSchedule
               ephemeralReports:
                 image:
-                  registry: registry.bitnami.com
+                  registry: public.ecr.aws
                 tolerations:
                   - key: app
                     operator: Equal
@@ -132,7 +132,7 @@ spec:
                     effect: NoSchedule
               clusterEphemeralReports:
                 image:
-                  registry: registry.bitnami.com
+                  registry: public.ecr.aws
                 tolerations:
                   - key: app
                     operator: Equal
