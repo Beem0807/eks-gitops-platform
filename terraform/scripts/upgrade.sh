@@ -183,7 +183,7 @@ REFRESH_TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
 echo "Refreshing ExternalSecrets..."
 
-kubectl annotate externalsecret argocd-admin \
+kubectl annotate externalsecret argocd-admin-password \
   -n argocd \
   force-sync="${REFRESH_TS}" \
   --overwrite || true
