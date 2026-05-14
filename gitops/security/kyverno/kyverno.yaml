@@ -42,6 +42,13 @@ spec:
                 limits:
                   cpu: 500m
                   memory: 512Mi
+              nodeSelector:
+                app: core
+              tolerations:
+                - key: app
+                  operator: Equal
+                  value: core
+                  effect: NoSchedule
 
             backgroundController:
               resources:
@@ -51,6 +58,13 @@ spec:
                 limits:
                   cpu: 200m
                   memory: 128Mi
+              nodeSelector:
+                app: core
+              tolerations:
+                - key: app
+                  operator: Equal
+                  value: core
+                  effect: NoSchedule
 
             cleanupController:
               resources:
@@ -60,6 +74,13 @@ spec:
                 limits:
                   cpu: 200m
                   memory: 128Mi
+              nodeSelector:
+                app: core
+              tolerations:
+                - key: app
+                  operator: Equal
+                  value: core
+                  effect: NoSchedule
 
             reportsController:
               resources:
@@ -69,15 +90,13 @@ spec:
                 limits:
                   cpu: 200m
                   memory: 128Mi
-
-            nodeSelector:
-              app: core
-
-            tolerations:
-              - key: app
-                operator: Equal
-                value: core
-                effect: NoSchedule
+              nodeSelector:
+                app: core
+              tolerations:
+                - key: app
+                  operator: Equal
+                  value: core
+                  effect: NoSchedule
       destination:
         server: '{{.server}}'
         namespace: security
