@@ -33,6 +33,13 @@ spec:
         helm:
           releaseName: kyverno
           values: |
+            # nodeSelector falls back to global.nodeSelector for all controllers,
+            # all cleanupJobs, and the policyReportsCleanup hook job.
+            # tolerations have no global fallback — must be set per component.
+            global:
+              nodeSelector:
+                app: core
+
             admissionController:
               replicas: 1
               resources:
@@ -42,8 +49,6 @@ spec:
                 limits:
                   cpu: 500m
                   memory: 512Mi
-              nodeSelector:
-                app: core
               tolerations:
                 - key: app
                   operator: Equal
@@ -58,8 +63,6 @@ spec:
                 limits:
                   cpu: 200m
                   memory: 128Mi
-              nodeSelector:
-                app: core
               tolerations:
                 - key: app
                   operator: Equal
@@ -74,8 +77,6 @@ spec:
                 limits:
                   cpu: 200m
                   memory: 128Mi
-              nodeSelector:
-                app: core
               tolerations:
                 - key: app
                   operator: Equal
@@ -90,8 +91,6 @@ spec:
                 limits:
                   cpu: 200m
                   memory: 128Mi
-              nodeSelector:
-                app: core
               tolerations:
                 - key: app
                   operator: Equal
@@ -100,21 +99,42 @@ spec:
 
             cleanupJobs:
               admissionReports:
-                nodeSelector:
-                  app: core
                 tolerations:
                   - key: app
                     operator: Equal
                     value: core
                     effect: NoSchedule
               clusterAdmissionReports:
-                nodeSelector:
-                  app: core
                 tolerations:
                   - key: app
                     operator: Equal
                     value: core
                     effect: NoSchedule
+              updateRequests:
+                tolerations:
+                  - key: app
+                    operator: Equal
+                    value: core
+                    effect: NoSchedule
+              ephemeralReports:
+                tolerations:
+                  - key: app
+                    operator: Equal
+                    value: core
+                    effect: NoSchedule
+              clusterEphemeralReports:
+                tolerations:
+                  - key: app
+                    operator: Equal
+                    value: core
+                    effect: NoSchedule
+
+            policyReportsCleanup:
+              tolerations:
+                - key: app
+                  operator: Equal
+                  value: core
+                  effect: NoSchedule
       destination:
         server: '{{.server}}'
         namespace: security
