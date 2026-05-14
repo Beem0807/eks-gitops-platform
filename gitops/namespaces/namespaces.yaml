@@ -40,12 +40,12 @@ spec:
               annotations: {}
               resourceQuota: {}
 
-            # Every namespace the platform needs — except argocd.
+            # Every namespace the platform needs - except argocd.
             #
             # The argocd namespace is the bootstrap boundary: it must exist before
             # ArgoCD itself starts, so it is created by `helm install --create-namespace`
             # in bootstrap.sh. This app runs inside ArgoCD (wave -1), so it cannot
-            # create the namespace that ArgoCD depends on — that would be circular.
+            # create the namespace that ArgoCD depends on - that would be circular.
             #
             # kube-system and kube-node-lease are Kubernetes built-ins; never manage them here.
             namespaces:

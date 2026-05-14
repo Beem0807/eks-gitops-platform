@@ -8,12 +8,12 @@ metadata:
     app.kubernetes.io/managed-by: argocd
     app.kubernetes.io/component: namespaces
 spec:
-  description: Cluster namespace lifecycle management — creates namespaces and enforces resource quotas
+  description: Cluster namespace lifecycle management - creates namespaces and enforces resource quotas
 
   sourceRepos:
     - https://github.com/Beem0807/eks-gitops-platform.git
 
-  # Wildcard namespace destination is safe here — this project's only cluster-scoped
+  # Wildcard namespace destination is safe here - this project's only cluster-scoped
   # permission is Namespace, and ResourceQuotas are bounded by what the chart defines.
   destinations:
     - server: https://kubernetes.default.svc

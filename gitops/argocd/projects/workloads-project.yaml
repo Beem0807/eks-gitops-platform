@@ -17,7 +17,7 @@ spec:
     - server: https://kubernetes.default.svc
       namespace: simple-time-service
 
-  # Workloads deploy only namespace-scoped resources — no cluster-level access
+  # Workloads deploy only namespace-scoped resources - no cluster-level access
   clusterResourceWhitelist: []
 
   # Explicit whitelist of namespace-scoped resource types the workload charts are allowed to create.

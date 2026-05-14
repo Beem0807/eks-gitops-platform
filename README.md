@@ -21,8 +21,8 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 | **HPA + metrics-server** | Horizontal pod autoscaling based on CPU utilization |
 | **Loki + Fluent Bit** | Centralized log aggregation backed by S3 object storage, queryable in Grafana |
 | **Velero** | Cluster backup and restore - backs up Kubernetes resources and EBS volume snapshots to S3 |
-| **Kyverno** | Admission controller — evaluates `ClusterPolicy` rules on every pod admission and writes `PolicyReport` objects; all policies run in Audit mode by default |
-| **Policy Reporter** | Web UI for Kyverno `PolicyReport` and `ClusterPolicyReport` objects — accessible via `kubectl port-forward` |
+| **Kyverno** | Admission controller - evaluates `ClusterPolicy` rules on every pod admission and writes `PolicyReport` objects; all policies run in Audit mode by default |
+| **Policy Reporter** | Web UI for Kyverno `PolicyReport` and `ClusterPolicyReport` objects - accessible via `kubectl port-forward` |
 
 > **Name mapping:** `SimpleTimeService` = source in `app/` = Helm release `simple-time-service` = manifest in `k8s/microservice.yaml`. All the same thing.
 
@@ -34,7 +34,7 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 |-|-|
 | [app/README.md](app/README.md) | Docker image, CI pipeline, endpoints, container security |
 | [terraform/README.md](terraform/README.md) | Infrastructure provisioning, bootstrap module, remote state |
-| [charts/namespaces/README.md](charts/namespaces/README.md) | Namespace management chart — creates namespaces and ResourceQuotas from a values list |
+| [charts/namespaces/README.md](charts/namespaces/README.md) | Namespace management chart - creates namespaces and ResourceQuotas from a values list |
 | [charts/simple-time-service/README.md](charts/simple-time-service/README.md) | Helm chart values, install/upgrade, examples |
 | [charts/raw/README.md](charts/raw/README.md) | Generic chart for deploying arbitrary K8s resources via ApplicationSets |
 | [k8s/README.md](k8s/README.md) | Raw Kubernetes manifest (quick-start, no Helm) |
@@ -67,7 +67,7 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 
 ### ACM certificate (required before bootstrap)
 
-The ALB Ingress for ArgoCD, Grafana, and SimpleTimeService uses HTTPS with HTTP → HTTPS redirect. Prometheus and Alertmanager have no ingress — they are accessed via `kubectl port-forward`. The ALB listener looks up a certificate by domain match, so an ACM certificate covering your domain **must exist and be validated** before running `bootstrap.sh`.
+The ALB Ingress for ArgoCD, Grafana, and SimpleTimeService uses HTTPS with HTTP → HTTPS redirect. Prometheus and Alertmanager have no ingress - they are accessed via `kubectl port-forward`. The ALB listener looks up a certificate by domain match, so an ACM certificate covering your domain **must exist and be validated** before running `bootstrap.sh`.
 
 A wildcard certificate is the simplest option - one cert covers all subdomains:
 
@@ -187,7 +187,7 @@ bash terraform/scripts/upgrade.sh
 | 10 | Thanos Query healthy | `kubectl get pods -n monitoring -l app.kubernetes.io/name=thanos-query` - `Running`; add Thanos datasource in Grafana pointing to `thanos-query.monitoring.svc:9090` |
 | 11 | EBS volumes provisioned | `kubectl get pv` - PVs for Prometheus (20Gi), Alertmanager (2Gi), Thanos Compactor (10Gi), StoreGateway (5Gi) all `Bound` |
 | 12 | Velero running | `kubectl get pods -n velero` - `Running`; `kubectl get backupstoragelocation -n velero` - `Available` |
-| 13 | Kyverno policies synced | `kubectl get clusterpolicy` — four policies listed; `kubectl get policyreport -A` — reports generated after pod activity |
+| 13 | Kyverno policies synced | `kubectl get clusterpolicy` - four policies listed; `kubectl get policyreport -A` - reports generated after pod activity |
 | 14 | Policy Reporter UI reachable | `kubectl port-forward svc/policy-reporter-ui -n security 8080:8080` → open `http://localhost:8080` |
 
 ---
@@ -368,11 +368,11 @@ bash terraform/scripts/upgrade.sh
 These are production-grade patterns used throughout the platform, documented here to explain the reasoning.
 
 - **ArgoCD project scoping** - every ApplicationSet is assigned to one of six AppProjects (`bootstrap`, `namespaces`, `platform`, `observability`, `security`, `workloads`). Each project restricts which source repos, destination namespaces, and cluster-scoped resource kinds are permitted, preventing a misconfigured app from deploying outside its intended scope. Projects are applied by `bootstrap.sh` before the root app so they exist before ArgoCD first syncs; subsequent changes are auto-reconciled via GitOps. See [gitops/README.md](gitops/README.md#argocd-projects) for the full project breakdown.
-- **Core/workload node split** - managed node group nodes are tainted `app=core:NoSchedule` and run system components. Karpenter provisions separate workload nodes (tainted `app=workload:NoSchedule`) for the application. This keeps system stability independent of application scaling — a misbehaving workload cannot starve the control plane components.
+- **Core/workload node split** - managed node group nodes are tainted `app=core:NoSchedule` and run system components. Karpenter provisions separate workload nodes (tainted `app=workload:NoSchedule`) for the application. This keeps system stability independent of application scaling - a misbehaving workload cannot starve the control plane components.
 - **ArgoCD self-managed via Helm** - bootstrapped once by `bootstrap.sh`, then manages its own upgrades and config through Git (`gitops/argocd/argocd.yaml`). All ArgoCD changes are auditable and reversible via the same GitOps workflow as everything else. The initial `helm install` is unavoidable (you need the engine running before it can manage itself), but it is the only manual step.
 - **Prometheus CRDs managed separately** - `prometheus-crds.yaml` installs CRDs at sync-wave 0 before `kube-prometheus-stack`. This decouples CRD lifecycle from the operator release, allowing CRD upgrades without touching the operator and avoiding the Helm CRD upgrade limitation.
 - **EBS CSI Driver and persistent storage** - the EBS CSI Driver runs at sync-wave 1 so storage is available before any stateful workload installs. It creates a `gp3` StorageClass set as the cluster default (`WaitForFirstConsumer`, `Retain` reclaim policy, encryption enabled). Prometheus uses a 20 Gi PVC for its TSDB, Alertmanager uses a 2 Gi PVC for state (silences, notifications), and Thanos Compactor and StoreGateway each use their own PVCs (10 Gi and 5 Gi respectively). Loki uses S3 for chunk and index storage so no EBS volume is needed.
-- **Loki S3 storage** - Loki runs in SingleBinary mode with S3 as its object store backend. The bucket name is injected into the ArgoCD cluster secret as `loki-bucket-name` by `bootstrap.sh`/`upgrade.sh`, resolved at sync time via the ApplicationSet cluster generator, and consumed as `lokiBucketName` in Helm values. The Loki service account is annotated with an IRSA role that grants scoped read/write access to the Loki bucket — no static credentials are required.
+- **Loki S3 storage** - Loki runs in SingleBinary mode with S3 as its object store backend. The bucket name is injected into the ArgoCD cluster secret as `loki-bucket-name` by `bootstrap.sh`/`upgrade.sh`, resolved at sync time via the ApplicationSet cluster generator, and consumed as `lokiBucketName` in Helm values. The Loki service account is annotated with an IRSA role that grants scoped read/write access to the Loki bucket - no static credentials are required.
 - **Thanos long-term retention** - Prometheus ships blocks to an S3 bucket via the Thanos sidecar. Compactor enforces retention (30d raw / 90d 5m / 180d 1h). StoreGateway serves historical queries. Query runs alongside Prometheus for a unified query endpoint.
 - **Prometheus Adapter** - bridges Prometheus metrics into the Kubernetes custom metrics API. Enables HPA rules that scale on arbitrary Prometheus queries rather than just CPU/memory.
 
@@ -401,14 +401,14 @@ cd terraform/app-bootstrap && terraform destroy
 
 The cleanup script runs six steps in order:
 
-1. **Kubernetes resources** — deletes the root app, all ArgoCD Applications and ApplicationSets, Ingresses, LoadBalancer Services, Karpenter NodePools and NodeClaims, PersistentVolumes, and all namespaces labelled `app.kubernetes.io/part-of=eks-gitops-platform` (including `security`) (every namespace created by the `cluster-namespaces` chart)
-2. **AWS Load Balancers** — deletes any leftover ALB/NLB/Classic ELBs tagged for the cluster that were not removed by step 1
-3. **EBS volumes and snapshots** — deletes EBS volumes tagged `kubernetes.io/cluster/<cluster>=owned` (CSI Driver PVCs with Retain policy), then deletes EBS snapshots tagged for the cluster or with a `velero.io/backup` tag
-4. **S3 buckets** — empties all versioned S3 buckets in the same region whose name contains the cluster name (Thanos, Loki, Velero), draining all object versions and delete markers in batches so that Terraform can delete the buckets cleanly
-5. **Kyverno CRDs** — deletes all CRDs in the `kyverno.io` and `wgpolicyk8s.io` API groups; this is handled automatically by `cleanup.sh` using a label selector
-6. **Terraform destroy** — removes all AWS resources provisioned by Terraform
+1. **Kubernetes resources** - deletes the root app, all ArgoCD Applications and ApplicationSets, Ingresses, LoadBalancer Services, Karpenter NodePools and NodeClaims, PersistentVolumes, and all namespaces labelled `app.kubernetes.io/part-of=eks-gitops-platform` (including `security`) (every namespace created by the `cluster-namespaces` chart)
+2. **AWS Load Balancers** - deletes any leftover ALB/NLB/Classic ELBs tagged for the cluster that were not removed by step 1
+3. **EBS volumes and snapshots** - deletes EBS volumes tagged `kubernetes.io/cluster/<cluster>=owned` (CSI Driver PVCs with Retain policy), then deletes EBS snapshots tagged for the cluster or with a `velero.io/backup` tag
+4. **S3 buckets** - empties all versioned S3 buckets in the same region whose name contains the cluster name (Thanos, Loki, Velero), draining all object versions and delete markers in batches so that Terraform can delete the buckets cleanly
+5. **Kyverno CRDs** - deletes all CRDs in the `kyverno.io` and `wgpolicyk8s.io` API groups; this is handled automatically by `cleanup.sh` using a label selector
+6. **Terraform destroy** - removes all AWS resources provisioned by Terraform
 
-> The Terraform **state bucket** is not managed by Terraform itself — delete it manually when no longer needed:
+> The Terraform **state bucket** is not managed by Terraform itself - delete it manually when no longer needed:
 > ```bash
 > aws s3 rb s3://<your-state-bucket> --force
 > ```
@@ -431,5 +431,5 @@ The cleanup script runs six steps in order:
 | Thanos pods in `CrashLoopBackOff` | Check that the `thanos-objstore-config` Secret exists in the `monitoring` namespace: `kubectl get secret thanos-objstore-config -n monitoring`. The `thanos-objstore-secret` ArgoCD app must sync before `thanos`. |
 | Prometheus Adapter not serving custom metrics | Run `kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1` to verify the API is registered. If empty, check `kubectl logs -n monitoring -l app.kubernetes.io/name=prometheus-adapter`. |
 | Policy Reporter UI not loading | Check pod is running: `kubectl get pods -n security -l app.kubernetes.io/name=policy-reporter`. Access via port-forward: `kubectl port-forward svc/policy-reporter-ui -n security 8080:8080`. |
-| `kubectl get clusterpolicy` returns nothing | The `kyverno-policies` ArgoCD app may not have synced. Check: `argocd app get kyverno-policies-in-cluster`. Kyverno CRDs must be registered first — confirm: `kubectl get crd | grep kyverno`. |
+| `kubectl get clusterpolicy` returns nothing | The `kyverno-policies` ArgoCD app may not have synced. Check: `argocd app get kyverno-policies-in-cluster`. Kyverno CRDs must be registered first - confirm: `kubectl get crd | grep kyverno`. |
 | Kyverno pods crash-looping | Check resource pressure on core nodes: `kubectl top nodes -l app=core`. Kyverno admission controller requires ~128 Mi memory. Check events: `kubectl describe pods -n security -l app.kubernetes.io/name=kyverno`. |

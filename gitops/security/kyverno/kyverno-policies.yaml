@@ -30,7 +30,7 @@ spec:
       project: security
       source:
         repoURL: https://github.com/Beem0807/eks-gitops-platform.git
-        targetRevision: feature/argocd-hardening
+        targetRevision: main
         path: charts/raw
         helm:
           releaseName: kyverno-policies
@@ -40,7 +40,7 @@ spec:
               # ── 1. Require resource limits ────────────────────────────────────────
               # Ensures every container declares CPU and memory limits so the scheduler
               # can make accurate placement decisions and prevent noisy-neighbour issues.
-              # Action: Audit — generates a PolicyReport without blocking deploys.
+              # Action: Audit - generates a PolicyReport without blocking deploys.
               - apiVersion: kyverno.io/v1
                 kind: ClusterPolicy
                 metadata:
@@ -77,7 +77,7 @@ spec:
               # Privileged containers share the host kernel namespace and can escape
               # the container boundary. Enforced immediately; system namespaces are
               # excluded because DaemonSets like Karpenter node agents require it.
-              # Action: Audit — generates a PolicyReport without blocking deploys.
+              # Action: Audit - generates a PolicyReport without blocking deploys.
               - apiVersion: kyverno.io/v1
                 kind: ClusterPolicy
                 metadata:
@@ -116,7 +116,7 @@ spec:
               # ── 3. Disallow :latest image tag ─────────────────────────────────────
               # Mutable tags make rollbacks unpredictable and prevent ArgoCD from
               # detecting image drift. Two rules: tag must exist, and must not be :latest.
-              # Action: Audit — allows gradual migration of existing workloads.
+              # Action: Audit - allows gradual migration of existing workloads.
               - apiVersion: kyverno.io/v1
                 kind: ClusterPolicy
                 metadata:
@@ -161,7 +161,7 @@ spec:
               # Running as UID 0 inside a container can allow privilege escalation
               # via kernel exploits. Either the pod-level or container-level context
               # must set runAsNonRoot=true.
-              # Action: Audit — gives teams time to update existing workloads.
+              # Action: Audit - gives teams time to update existing workloads.
               - apiVersion: kyverno.io/v1
                 kind: ClusterPolicy
                 metadata:

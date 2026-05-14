@@ -1,5 +1,5 @@
 global:
-  # -- Labels applied to every namespace. Per-namespace labels are merged on top — per-namespace wins on key conflicts.
+  # -- Labels applied to every namespace. Per-namespace labels are merged on top - per-namespace wins on key conflicts.
   labels:
     app.kubernetes.io/part-of: eks-gitops-platform
     app.kubernetes.io/managed-by: argocd

@@ -79,7 +79,7 @@ spec:
                 effect: NoSchedule
 
             # The upgrade-crds hook job expects /tmp/sh which is bitnami-specific.
-            # CRDs are managed by the chart install/upgrade — disable the hook.
+            # CRDs are managed by the chart install/upgrade - disable the hook.
             upgradeCRDs: false
 
             metrics:

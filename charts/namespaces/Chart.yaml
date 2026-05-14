@@ -1,5 +1,5 @@
 apiVersion: v2
 name: namespaces
-description: Centralized namespace management — creates namespaces with optional ResourceQuotas
+description: Centralized namespace management - creates namespaces with optional ResourceQuotas
 type: application
 version: 1.0.0

@@ -48,7 +48,7 @@ spec:
     - server: https://kubernetes.default.svc
       namespace: kube-node-lease
 
-  # Infrastructure tools install CRDs, ClusterRoles, and webhooks — allow all cluster-scoped resources
+  # Infrastructure tools install CRDs, ClusterRoles, and webhooks - allow all cluster-scoped resources
   clusterResourceWhitelist:
     - group: "*"
       kind: "*"

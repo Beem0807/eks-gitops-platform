@@ -45,7 +45,7 @@ Installs the admission controller, background controller, cleanup controller, an
 
 | Controller | Purpose |
 |-----------|---------|
-| `admissionController` | Validates/mutates resources on admission — the core webhook |
+| `admissionController` | Validates/mutates resources on admission - the core webhook |
 | `backgroundController` | Re-evaluates existing resources against policies (background scan) |
 | `cleanupController` | Runs `ClusterCleanupPolicy` rules on a schedule |
 | `reportsController` | Aggregates admission results into `PolicyReport` and `ClusterPolicyReport` objects |
@@ -60,7 +60,7 @@ kubectl get pods -n security -l app.kubernetes.io/name=kyverno
 
 ## ClusterPolicies
 
-Four policies are deployed, all set to **Audit** mode (`validationFailureAction: Audit`). Audit mode writes results to `PolicyReport` objects without blocking pod admission — safe to enable on existing clusters.
+Four policies are deployed, all set to **Audit** mode (`validationFailureAction: Audit`). Audit mode writes results to `PolicyReport` objects without blocking pod admission - safe to enable on existing clusters.
 
 | Policy | Category | Severity | What it checks |
 |--------|----------|----------|----------------|
@@ -106,7 +106,7 @@ Provides a read-only web UI over the `PolicyReport` and `ClusterPolicyReport` ob
 | Setting | Value |
 |---------|-------|
 | Chart | `policy-reporter` v2.24.1 from `https://kyverno.github.io/policy-reporter` |
-| Kyverno plugin | enabled — enriches reports with policy metadata |
+| Kyverno plugin | enabled - enriches reports with policy metadata |
 | Access | `kubectl port-forward` only (no ingress) |
 | Namespace | `security` |
 
@@ -128,8 +128,8 @@ Expected pods:
 
 | Pod | Purpose |
 |-----|---------|
-| `policy-reporter-*` | Core reporter — watches PolicyReport objects |
-| `policy-reporter-kyverno-plugin-*` | Kyverno plugin — enriches reports with policy details |
+| `policy-reporter-*` | Core reporter - watches PolicyReport objects |
+| `policy-reporter-kyverno-plugin-*` | Kyverno plugin - enriches reports with policy details |
 | `policy-reporter-ui-*` | Web UI |
 
 ---
@@ -139,7 +139,7 @@ Expected pods:
 | Symptom | Fix |
 |---------|-----|
 | Kyverno pods pending | Check taint toleration: `kubectl describe pod -n security <pod>`. All components require `app=core:NoSchedule` toleration. |
-| `kubectl get clusterpolicy` returns nothing | The `kyverno-policies` app has not synced. Check: `argocd app get kyverno-policies-in-cluster`. Kyverno CRDs must be registered first — confirm: `kubectl get crd \| grep kyverno`. |
+| `kubectl get clusterpolicy` returns nothing | The `kyverno-policies` app has not synced. Check: `argocd app get kyverno-policies-in-cluster`. Kyverno CRDs must be registered first - confirm: `kubectl get crd \| grep kyverno`. |
 | ClusterPolicy shows `OutOfSync` in ArgoCD | Kyverno webhooks inject `skipBackgroundRequests` into rule specs. The `ignoreDifferences` block handles this. If still out of sync, check: `argocd app diff kyverno-policies-in-cluster`. |
 | Policy Reporter UI blank / no data | Policies generate reports only after pod admission activity. Create or restart a pod in any namespace to trigger report generation: `kubectl rollout restart deploy/<name> -n <namespace>`. |
 | `policy-reporter-kyverno-plugin` pending | Check node scheduling: `kubectl describe pod -n security -l app.kubernetes.io/name=policy-reporter-kyverno-plugin`. Toleration for `app=core` must be present. |

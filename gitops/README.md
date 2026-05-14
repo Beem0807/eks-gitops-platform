@@ -187,7 +187,7 @@ Any push to `main` affecting `gitops/` or `charts/` is automatically applied wit
 | external-dns | external-dns | platform | 2 | Route53 DNS records from Ingress/Service |
 | karpenter | karpenter | platform | 3 | Karpenter controller (workload node provisioner) |
 | velero | velero | platform | 3 | Cluster backup and restore to S3 + EBS snapshots |
-| kyverno | security | security | 3 | Kyverno admission controller — enforces ClusterPolicies cluster-wide |
+| kyverno | security | security | 3 | Kyverno admission controller - enforces ClusterPolicies cluster-wide |
 | cluster-secret-store | external-secrets | platform | 4 | ClusterSecretStore pointing to AWS Secrets Manager |
 | karpenter-nodepools | karpenter | platform | 4 | EC2NodeClass + NodePool for `t3a.medium`/`c6a.large` |
 | kyverno-policies | security | security | 5 | Four audit-mode ClusterPolicies (resource limits, privileged containers, latest tag, non-root) |
@@ -225,7 +225,7 @@ ArgoCD advances through sync waves sequentially, waiting for all resources in th
 | 3 | Karpenter, Velero, **Kyverno** | All three install admission webhooks; a one-wave gap after LBC lets all webhook cert chains stabilise |
 | 4 | ClusterSecretStore, Karpenter NodePools | Require wave 1 (ESO) and wave 3 (Karpenter) webhook certs to be stable |
 | 5 | All ExternalSecrets, VeleroSchedule, Kyverno ClusterPolicies | Require ClusterSecretStore (wave 4) to be ready before they can sync from Secrets Manager |
-| 6 | **ArgoCD Ingress**, Loki, Policy Reporter UI | Ingresses applied 4 waves after LBC — webhook cert fully propagated |
+| 6 | **ArgoCD Ingress**, Loki, Policy Reporter UI | Ingresses applied 4 waves after LBC - webhook cert fully propagated |
 | 7 | Prometheus (kube-prometheus-stack) | Requires secrets (wave 5) and LBC for Grafana Ingress (wave 2 mature) |
 | 8 | SimpleTimeService, Fluent Bit, Grafana datasource + dashboard | Require Loki (wave 6) and Prometheus (wave 7) |
 | 9 | Prometheus Adapter, AlertmanagerConfig | Require Prometheus to be running |
@@ -237,18 +237,18 @@ ArgoCD advances through sync waves sequentially, waiting for all resources in th
 
 ## ArgoCD Projects
 
-All ApplicationSets are scoped to one of five AppProjects defined in `gitops/argocd/projects/`. Projects enforce which source repos, destination namespaces, and cluster-scoped resource kinds each group of apps is allowed to use — preventing a misconfigured or compromised app from deploying to an unintended namespace or installing arbitrary cluster resources.
+All ApplicationSets are scoped to one of five AppProjects defined in `gitops/argocd/projects/`. Projects enforce which source repos, destination namespaces, and cluster-scoped resource kinds each group of apps is allowed to use - preventing a misconfigured or compromised app from deploying to an unintended namespace or installing arbitrary cluster resources.
 
 | Project | File | Allowed namespaces | Cluster resources | Covers |
 |---------|------|--------------------|-------------------|--------|
-| `bootstrap` | `bootstrap-project.yaml` | `argocd` | None — root-app only deploys namespace-scoped ArgoCD resources | root-app only |
+| `bootstrap` | `bootstrap-project.yaml` | `argocd` | None - root-app only deploys namespace-scoped ArgoCD resources | root-app only |
 | `namespaces` | `namespaces-project.yaml` | `*` | `Namespace` only | cluster-namespaces (creates namespaces + ResourceQuotas) |
-| `platform` | `platform-project.yaml` | `argocd`, `kube-system`, `karpenter`, `external-secrets`, `external-dns`, `reloader`, `velero`, `kube-node-lease` | All (`*/*`) — infra tools install CRDs and cluster RBAC | ArgoCD self-management, networking, autoscaling, secrets, storage, backup |
+| `platform` | `platform-project.yaml` | `argocd`, `kube-system`, `karpenter`, `external-secrets`, `external-dns`, `reloader`, `velero`, `kube-node-lease` | All (`*/*`) - infra tools install CRDs and cluster RBAC | ArgoCD self-management, networking, autoscaling, secrets, storage, backup |
 | `observability` | `observability-project.yaml` | `monitoring`, `logging`, `kube-system` | `CustomResourceDefinition`, `ClusterRole`, `ClusterRoleBinding` | Prometheus, Grafana, Thanos, Loki, Fluent Bit, alerts |
 | `security` | `security-project.yaml` | `security` | `CustomResourceDefinition`, `ClusterRole`, `ClusterRoleBinding`, webhooks, `ClusterPolicy` | Kyverno admission controller, ClusterPolicies, Policy Reporter |
 | `workloads` | `workloads-project.yaml` | `simple-time-service` | None | Application workloads |
 
-The `bootstrap` project breaks the circular dependency that existed when root-app lived in the `platform` project: root-app managed the platform AppProject, but the platform AppProject governed root-app's permissions. If the platform project became misconfigured, root-app could not reconcile itself out of the problem. With root-app in its own tightly-scoped project, a broken platform project does not affect root-app — and recovering is a single `kubectl apply`.
+The `bootstrap` project breaks the circular dependency that existed when root-app lived in the `platform` project: root-app managed the platform AppProject, but the platform AppProject governed root-app's permissions. If the platform project became misconfigured, root-app could not reconcile itself out of the problem. With root-app in its own tightly-scoped project, a broken platform project does not affect root-app - and recovering is a single `kubectl apply`.
 
 **Bootstrap order:** `bootstrap.sh` applies all project manifests from `gitops/argocd/projects/` (including `bootstrap-project.yaml`) before applying `root-app.yaml`, ensuring every project exists before ArgoCD tries to sync an app that references it. After bootstrap, project changes pushed to `main` are automatically reconciled by root-app via `ServerSideApply`.
 

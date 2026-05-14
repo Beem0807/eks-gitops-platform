@@ -39,7 +39,7 @@ Pod receives mounted volume at the configured mountPath
 |---------|-------|
 | Chart | `aws-ebs-csi-driver` v2.32.0 (from `https://kubernetes-sigs.github.io/aws-ebs-csi-driver/`) |
 | Controller nodes | core nodes (`app=core` nodeSelector + toleration) |
-| Node DaemonSet | `tolerateAllTaints: true` — runs on every node regardless of taints |
+| Node DaemonSet | `tolerateAllTaints: true` - runs on every node regardless of taints |
 | IRSA | `<cluster-name>-ebs-csi-controller-irsa` |
 
 The IRSA role is provisioned by `terraform/ebs-csi-driver-irsa.tf` using the module's built-in `attach_ebs_csi_policy = true` flag, which attaches the AWS-managed `AmazonEBSCSIDriverPolicy`.
@@ -62,7 +62,7 @@ A single `gp3` StorageClass is created as the cluster default:
 | Name | `gp3` | Default StorageClass for all PVCs |
 | Volume type | `gp3` | Better baseline throughput and IOPS than `gp2` at same cost |
 | Encrypted | `true` | All volumes encrypted at rest |
-| Reclaim policy | `Retain` | Volumes are **not** deleted when a PVC is deleted — manual cleanup required |
+| Reclaim policy | `Retain` | Volumes are **not** deleted when a PVC is deleted - manual cleanup required |
 | Volume binding | `WaitForFirstConsumer` | Volume created in the pod's AZ only after scheduling |
 | Volume expansion | `true` | PVCs can be resized without downtime |
 
@@ -104,4 +104,4 @@ kubectl get pv
 | PVC stuck in `Pending` | Check CSI controller logs: `kubectl logs -n kube-system -l app=ebs-csi-controller -c csi-provisioner`. Confirm the IRSA role ARN is correct on the controller service account: `kubectl get sa ebs-csi-controller-sa -n kube-system -o yaml`. |
 | `StorageClass "gp3" not found` | The EBS CSI Driver app may not have synced yet. Check ArgoCD: `kubectl get app aws-ebs-csi-driver -n argocd`. |
 | Volume stuck in `Attaching` | The EBS volume may be in a different AZ than the pod. `WaitForFirstConsumer` prevents this for new PVCs, but an existing volume cannot be moved. Delete the PVC and PV and let them be recreated. |
-| Volume not deleted after PVC deletion | Expected — `Retain` policy. To delete manually: `aws ec2 delete-volume --volume-id <vol-id> --region <region>`. |
+| Volume not deleted after PVC deletion | Expected - `Retain` policy. To delete manually: `aws ec2 delete-volume --volume-id <vol-id> --region <region>`. |

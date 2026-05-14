@@ -35,7 +35,7 @@ spec:
           values: |
             # nodeSelector falls back to global.nodeSelector for all controllers,
             # all cleanupJobs, and the policyReportsCleanup hook job.
-            # tolerations have no global fallback — must be set per component.
+            # tolerations have no global fallback - must be set per component.
             global:
               nodeSelector:
                 app: core
