@@ -99,30 +99,40 @@ spec:
 
             cleanupJobs:
               admissionReports:
+                image:
+                  registry: registry.bitnami.com
                 tolerations:
                   - key: app
                     operator: Equal
                     value: core
                     effect: NoSchedule
               clusterAdmissionReports:
+                image:
+                  registry: registry.bitnami.com
                 tolerations:
                   - key: app
                     operator: Equal
                     value: core
                     effect: NoSchedule
               updateRequests:
+                image:
+                  registry: registry.bitnami.com
                 tolerations:
                   - key: app
                     operator: Equal
                     value: core
                     effect: NoSchedule
               ephemeralReports:
+                image:
+                  registry: registry.bitnami.com
                 tolerations:
                   - key: app
                     operator: Equal
                     value: core
                     effect: NoSchedule
               clusterEphemeralReports:
+                image:
+                  registry: registry.bitnami.com
                 tolerations:
                   - key: app
                     operator: Equal
@@ -130,6 +140,8 @@ spec:
                     effect: NoSchedule
 
             policyReportsCleanup:
+              image:
+                registry: registry.bitnami.com
               tolerations:
                 - key: app
                   operator: Equal
