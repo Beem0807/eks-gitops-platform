@@ -49,24 +49,6 @@ resource "aws_secretsmanager_secret_version" "grafana_admin" {
   })
 }
 
-resource "aws_secretsmanager_secret" "policy_reporter_basic_auth" {
-  name                    = "policy-reporter/basic-auth"
-  description             = "Policy Reporter UI basic auth credentials"
-  recovery_window_in_days = 0
-
-  tags = merge(var.tags, {
-    ExternalSecret = "true"
-  })
-}
-
-resource "aws_secretsmanager_secret_version" "policy_reporter_basic_auth" {
-  secret_id = aws_secretsmanager_secret.policy_reporter_basic_auth.id
-
-  secret_string = jsonencode({
-    username = var.policy_reporter_basic_auth_username
-    password = var.policy_reporter_basic_auth_password
-  })
-}
 
 resource "aws_secretsmanager_secret" "alertmanager_webhook" {
   name                    = "alertmanager-webhook"

@@ -81,7 +81,7 @@ Root-app discovers all YAML files under `gitops/` recursively. Sync wave annotat
 | 2 | Networking (ALB controller, ExternalDNS) |
 | 3 | Karpenter, Velero, Kyverno |
 | 4 | Karpenter node pools, cluster secret store |
-| 5 | Secrets (ArgoCD admin, Grafana admin, Alertmanager webhook, Thanos objstore, Policy Reporter basic auth), Kyverno ClusterPolicies |
+| 5 | Secrets (ArgoCD admin, Grafana admin, Alertmanager webhook, Thanos objstore), Kyverno ClusterPolicies |
 | 6 | Loki, ArgoCD ingress, Policy Reporter UI |
 | 7 | Prometheus |
 | 8 | Workloads, Grafana dashboards, Fluent Bit |

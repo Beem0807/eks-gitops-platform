@@ -17,8 +17,6 @@ spec:
         selector:
           matchLabels:
             argocd.argoproj.io/secret-type: cluster
-        values:
-          domainName: '{{index .metadata.annotations "domain-name"}}'
   template:
     metadata:
       name: 'policy-reporter-{{.nameNormalized}}'
@@ -68,10 +66,6 @@ spec:
               plugins:
                 kyverno: true
 
-              basicAuth:
-                enabled: true
-                secretRef: policy-reporter-basic-auth
-
               resources:
                 requests:
                   cpu: 50m
@@ -88,24 +82,6 @@ spec:
                   operator: Equal
                   value: core
                   effect: NoSchedule
-
-              ingress:
-                enabled: true
-                className: alb
-                annotations:
-                  alb.ingress.kubernetes.io/scheme: internet-facing
-                  alb.ingress.kubernetes.io/target-type: ip
-                  alb.ingress.kubernetes.io/backend-protocol: HTTP
-                  alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
-                  alb.ingress.kubernetes.io/ssl-redirect: "443"
-                tls:
-                  - hosts:
-                      - "policy-reporter.platform.{{ .values.domainName }}"
-                hosts:
-                  - host: "policy-reporter.platform.{{ .values.domainName }}"
-                    paths:
-                      - path: /
-                        pathType: Prefix
       destination:
         server: '{{.server}}'
         namespace: security

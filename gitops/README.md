@@ -81,8 +81,7 @@ gitops/
     └── kyverno/
         ├── kyverno.yaml                            # ApplicationSet - Kyverno admission controller (wave 3)
         ├── kyverno-policies.yaml                   # ApplicationSet - ClusterPolicy rules via charts/raw (wave 5)
-        ├── policy-reporter-secret.yaml             # ApplicationSet - ExternalSecret for basic auth (wave 5)
-        └── policy-reporter.yaml                    # ApplicationSet - Policy Reporter UI with ALB Ingress (wave 6)
+        └── policy-reporter.yaml                    # ApplicationSet - Policy Reporter UI (wave 6)
 ```
 
 ---
@@ -99,7 +98,7 @@ gitops/
 | [monitoring/README.md](monitoring/README.md) | Prometheus, Grafana, Thanos, Prometheus Adapter, ServiceMonitor |
 | [alerts/README.md](alerts/README.md) | PrometheusRules, Slack setup, testing, silencing, grouping |
 | [logs/README.md](logs/README.md) | Loki S3 backend, Fluent Bit, Grafana datasource, LogQL queries |
-| [security/README.md](security/README.md) | Kyverno policies, Policy Reporter UI, basic auth, policy reports |
+| [security/README.md](security/README.md) | Kyverno policies, Policy Reporter UI, policy reports |
 
 ---
 
@@ -197,9 +196,8 @@ Any push to `main` affecting `gitops/` or `charts/` is automatically applied wit
 | alertmanager-webhook-secret | monitoring | observability | 5 | Syncs Slack webhook URL from Secrets Manager |
 | thanos-objstore-secret | monitoring | observability | 5 | S3 objstore Secret injected from cluster annotations |
 | velero-schedule | velero | platform | 5 | Daily full-cluster backup at 02:00 UTC, 30-day retention |
-| policy-reporter-secret | security | security | 5 | Syncs Policy Reporter basic auth credentials from Secrets Manager |
 | argocd-ingress | argocd | platform | 6 | ALB Ingress at `argocd.platform.<domain>` |
-| policy-reporter | security | security | 6 | Policy Reporter UI at `policy-reporter.platform.<domain>` |
+| policy-reporter | security | security | 6 | Policy Reporter UI (port-forward access) |
 | loki | logging | observability | 6 | Loki log store |
 | prometheus | monitoring | observability | 7 | kube-prometheus-stack |
 | simple-time-service | simple-time-service | workloads | 8 | SimpleTimeService Helm chart (HPA, ALB Ingress) |
@@ -226,7 +224,7 @@ ArgoCD advances through sync waves sequentially, waiting for all resources in th
 | 2 | **LBC**, ExternalDNS | Network controllers given their own wave so the LBC admission webhook cert has time to propagate before any Ingress is applied |
 | 3 | Karpenter, Velero, **Kyverno** | All three install admission webhooks; a one-wave gap after LBC lets all webhook cert chains stabilise |
 | 4 | ClusterSecretStore, Karpenter NodePools | Require wave 1 (ESO) and wave 3 (Karpenter) webhook certs to be stable |
-| 5 | All ExternalSecrets, VeleroSchedule, Kyverno ClusterPolicies, policy-reporter-secret | Require ClusterSecretStore (wave 4) to be ready before they can sync from Secrets Manager |
+| 5 | All ExternalSecrets, VeleroSchedule, Kyverno ClusterPolicies | Require ClusterSecretStore (wave 4) to be ready before they can sync from Secrets Manager |
 | 6 | **ArgoCD Ingress**, Loki, Policy Reporter UI | Ingresses applied 4 waves after LBC — webhook cert fully propagated |
 | 7 | Prometheus (kube-prometheus-stack) | Requires secrets (wave 5) and LBC for Grafana Ingress (wave 2 mature) |
 | 8 | SimpleTimeService, Fluent Bit, Grafana datasource + dashboard | Require Loki (wave 6) and Prometheus (wave 7) |
