@@ -199,8 +199,8 @@ spec:
       ignoreDifferences:
         - group: kyverno.io
           kind: ClusterPolicy
-          jsonPointers:
-            - /spec/skipBackgroundRequests
+          jqPathExpressions:
+            - .spec.rules[].skipBackgroundRequests
       destination:
         server: '{{.server}}'
         namespace: security
