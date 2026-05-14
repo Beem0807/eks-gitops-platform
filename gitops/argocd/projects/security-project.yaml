@@ -12,7 +12,7 @@ spec:
 
   sourceRepos:
     # Kyverno Helm chart
-    - https://charts.kyverno.io
+    - https://kyverno.github.io/kyverno
     # Policy Reporter UI
     - https://kyverno.github.io/policy-reporter
     # GitOps repo (kyverno-policies via charts/raw)
