@@ -104,6 +104,23 @@ else
   export TF_VAR_grafana_admin_password="$GRAFANA_ADMIN_PASSWORD"
 fi
 
+if [[ -n "${TF_VAR_policy_reporter_basic_auth_password:-}" ]]; then
+  echo "Using provided TF_VAR_policy_reporter_basic_auth_password."
+else
+  POLICY_REPORTER_PASSWORD="${POLICY_REPORTER_PASSWORD:-}"
+
+  if [[ -z "$POLICY_REPORTER_PASSWORD" ]]; then
+    POLICY_REPORTER_PASSWORD="$(openssl rand -base64 24)"
+    echo "Generated Policy Reporter basic auth password."
+  else
+    echo "Using provided POLICY_REPORTER_PASSWORD."
+  fi
+
+  export TF_VAR_policy_reporter_basic_auth_password="$POLICY_REPORTER_PASSWORD"
+fi
+
+export TF_VAR_policy_reporter_basic_auth_username="${POLICY_REPORTER_USERNAME:-admin}"
+
 echo "Running Terraform..."
 cd "$TF_DIR"
 
@@ -178,6 +195,11 @@ kubectl annotate externalsecret grafana-admin \
 
 kubectl annotate externalsecret alertmanager-webhook \
   -n monitoring \
+  force-sync="${REFRESH_TS}" \
+  --overwrite || true
+
+kubectl annotate externalsecret policy-reporter-basic-auth \
+  -n security \
   force-sync="${REFRESH_TS}" \
   --overwrite || true
 

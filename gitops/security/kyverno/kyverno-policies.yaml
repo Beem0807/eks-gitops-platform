@@ -1,0 +1,207 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: kyverno-policies
+  namespace: argocd
+  annotations:
+    # Wave 5: Kyverno webhooks must be fully stable before ClusterPolicy resources
+    # are applied, otherwise the Kyverno admission controller rejects its own CRDs.
+    argocd.argoproj.io/sync-wave: "5"
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: security
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            argocd.argoproj.io/secret-type: cluster
+  template:
+    metadata:
+      name: 'kyverno-policies-{{.nameNormalized}}'
+      labels:
+        app.kubernetes.io/part-of: eks-gitops-platform
+        app.kubernetes.io/managed-by: argocd
+        app.kubernetes.io/component: security
+    spec:
+      project: security
+      source:
+        repoURL: https://github.com/Beem0807/eks-gitops-platform.git
+        targetRevision: feature/argocd-hardening
+        path: charts/raw
+        helm:
+          releaseName: kyverno-policies
+          values: |
+            resources:
+
+              # ── 1. Require resource limits ────────────────────────────────────────
+              # Ensures every container declares CPU and memory limits so the scheduler
+              # can make accurate placement decisions and prevent noisy-neighbour issues.
+              # Action: Audit — generates a PolicyReport without blocking deploys.
+              - apiVersion: kyverno.io/v1
+                kind: ClusterPolicy
+                metadata:
+                  name: require-resource-limits
+                  annotations:
+                    policies.kyverno.io/title: Require Resource Limits
+                    policies.kyverno.io/category: Best Practices
+                    policies.kyverno.io/severity: medium
+                    policies.kyverno.io/description: >-
+                      All containers must declare CPU and memory limits so the
+                      scheduler can make accurate bin-packing decisions.
+                spec:
+                  validationFailureAction: Audit
+                  background: true
+                  rules:
+                    - name: validate-resource-limits
+                      match:
+                        any:
+                          - resources:
+                              kinds:
+                                - Pod
+                      validate:
+                        message: "CPU and memory resource limits are required for all containers."
+                        pattern:
+                          spec:
+                            containers:
+                              - name: "*"
+                                resources:
+                                  limits:
+                                    cpu: "?*"
+                                    memory: "?*"
+
+              # ── 2. Disallow privileged containers ────────────────────────────────
+              # Privileged containers share the host kernel namespace and can escape
+              # the container boundary. Enforced immediately; system namespaces are
+              # excluded because DaemonSets like Karpenter node agents require it.
+              # Action: Audit — generates a PolicyReport without blocking deploys.
+              - apiVersion: kyverno.io/v1
+                kind: ClusterPolicy
+                metadata:
+                  name: disallow-privileged-containers
+                  annotations:
+                    policies.kyverno.io/title: Disallow Privileged Containers
+                    policies.kyverno.io/category: Pod Security
+                    policies.kyverno.io/severity: high
+                    policies.kyverno.io/description: >-
+                      Privileged containers are denied cluster-wide. System namespaces
+                      (kube-system, karpenter) are excluded for node-level DaemonSets.
+                spec:
+                  validationFailureAction: Audit
+                  background: true
+                  rules:
+                    - name: privileged-containers
+                      match:
+                        any:
+                          - resources:
+                              kinds:
+                                - Pod
+                      exclude:
+                        any:
+                          - resources:
+                              namespaces:
+                                - kube-system
+                                - karpenter
+                      validate:
+                        message: "Privileged containers are not allowed."
+                        pattern:
+                          spec:
+                            containers:
+                              - =(securityContext):
+                                  =(privileged): "false"
+
+              # ── 3. Disallow :latest image tag ─────────────────────────────────────
+              # Mutable tags make rollbacks unpredictable and prevent ArgoCD from
+              # detecting image drift. Two rules: tag must exist, and must not be :latest.
+              # Action: Audit — allows gradual migration of existing workloads.
+              - apiVersion: kyverno.io/v1
+                kind: ClusterPolicy
+                metadata:
+                  name: disallow-latest-tag
+                  annotations:
+                    policies.kyverno.io/title: Disallow Latest Tag
+                    policies.kyverno.io/category: Best Practices
+                    policies.kyverno.io/severity: medium
+                    policies.kyverno.io/description: >-
+                      Images must be pinned to an immutable tag. Using ':latest' or
+                      omitting a tag is not allowed.
+                spec:
+                  validationFailureAction: Audit
+                  background: true
+                  rules:
+                    - name: require-image-tag
+                      match:
+                        any:
+                          - resources:
+                              kinds:
+                                - Pod
+                      validate:
+                        message: "An explicit image tag is required (e.g. image:v1.2.3)."
+                        pattern:
+                          spec:
+                            containers:
+                              - image: "*:*"
+                    - name: validate-image-tag
+                      match:
+                        any:
+                          - resources:
+                              kinds:
+                                - Pod
+                      validate:
+                        message: "Using a mutable image tag such as ':latest' is not allowed."
+                        pattern:
+                          spec:
+                            containers:
+                              - image: "!*:latest"
+
+              # ── 4. Require non-root user ──────────────────────────────────────────
+              # Running as UID 0 inside a container can allow privilege escalation
+              # via kernel exploits. Either the pod-level or container-level context
+              # must set runAsNonRoot=true.
+              # Action: Audit — gives teams time to update existing workloads.
+              - apiVersion: kyverno.io/v1
+                kind: ClusterPolicy
+                metadata:
+                  name: require-run-as-non-root
+                  annotations:
+                    policies.kyverno.io/title: Require Run As Non-Root User
+                    policies.kyverno.io/category: Pod Security
+                    policies.kyverno.io/severity: medium
+                    policies.kyverno.io/description: >-
+                      Containers must not run as root (UID 0). Set runAsNonRoot=true
+                      at the pod or container securityContext level.
+                spec:
+                  validationFailureAction: Audit
+                  background: true
+                  rules:
+                    - name: check-run-as-non-root
+                      match:
+                        any:
+                          - resources:
+                              kinds:
+                                - Pod
+                      validate:
+                        message: >-
+                          Containers must not run as root. Set
+                          spec.securityContext.runAsNonRoot=true or
+                          spec.containers[*].securityContext.runAsNonRoot=true.
+                        anyPattern:
+                          - spec:
+                              securityContext:
+                                runAsNonRoot: true
+                          - spec:
+                              containers:
+                                - securityContext:
+                                    runAsNonRoot: true
+      destination:
+        server: '{{.server}}'
+        namespace: security
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - ServerSideApply=true

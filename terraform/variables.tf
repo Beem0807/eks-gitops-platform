@@ -116,6 +116,19 @@ variable "alertmanager_slack_webhook_url" {
   sensitive   = true
 }
 
+variable "policy_reporter_basic_auth_username" {
+  description = "Policy Reporter UI basic auth username"
+  type        = string
+  default     = "admin"
+}
+
+variable "policy_reporter_basic_auth_password" {
+  description = "Policy Reporter UI basic auth password"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 variable "add_cluster_autoscaler_tags" {
   description = "Whether to add Cluster Autoscaler discovery tags to the node group"
   type        = bool

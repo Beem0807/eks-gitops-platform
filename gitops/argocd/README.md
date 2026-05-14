@@ -27,6 +27,7 @@ AppProjects are the primary security boundary in ArgoCD. Each project defines:
 | `namespaces` | Cluster namespace lifecycle — creates namespaces and ResourceQuotas | `Namespace` only |
 | `platform` | Cluster infrastructure — networking, autoscaling, secrets, storage, ArgoCD self-management | Wildcard (`*/*`) |
 | `observability` | Observability stack — Prometheus, Grafana, Thanos, Loki, Fluent Bit | CRDs, ClusterRoles, webhooks, APIService |
+| `security` | Policy enforcement — Kyverno admission controller and ClusterPolicy rules | CRDs, ClusterRoles/Bindings, webhooks, `ClusterPolicy` |
 | `workloads` | Application workloads | None (`[]`) |
 
 ### Least-privilege design
@@ -34,11 +35,12 @@ AppProjects are the primary security boundary in ArgoCD. Each project defines:
 Each project has exactly the permissions its apps need:
 
 ```
-bootstrap   →  [] cluster access   (AppProjects + Applications only, namespace-scoped in argocd)
-namespaces  →  Namespace           (creates namespaces + ResourceQuotas)
-platform    →  */*                 (CRDs, ClusterRoles, webhooks — infra tools need broad access)
-observability → explicit list      (CRDs, ClusterRoles, webhooks, APIService for Prometheus stack)
-workloads   →  [] cluster access   (Deployments, Services, etc. — all namespace-scoped)
+bootstrap     →  [] cluster access   (AppProjects + Applications only, namespace-scoped in argocd)
+namespaces    →  Namespace           (creates namespaces + ResourceQuotas)
+platform      →  */*                 (CRDs, ClusterRoles, webhooks — infra tools need broad access)
+observability →  explicit list       (CRDs, ClusterRoles, webhooks, APIService for Prometheus stack)
+security      →  explicit list       (CRDs, ClusterRoles, webhooks, ClusterPolicy — Kyverno needs all four)
+workloads     →  [] cluster access   (Deployments, Services, etc. — all namespace-scoped)
 ```
 
 The `workloads` project's `namespaceResourceWhitelist` is an explicit allowlist of namespace-scoped kinds workload charts are permitted to create, preventing a compromised workload from creating arbitrary resources (e.g. ClusterRoleBindings via a rogue Helm chart).
@@ -77,10 +79,10 @@ Root-app discovers all YAML files under `gitops/` recursively. Sync wave annotat
 | 0 | `prometheus-crds` — CRDs installed before the Prometheus stack |
 | 1 | Storage, autoscaling baseline, secrets operator, reloader |
 | 2 | Networking (ALB controller, ExternalDNS) |
-| 3 | Karpenter, Velero |
+| 3 | Karpenter, Velero, Kyverno |
 | 4 | Karpenter node pools, cluster secret store |
-| 5 | Secrets (ArgoCD admin, Grafana admin, Alertmanager webhook, Thanos objstore) |
-| 6 | Loki, ArgoCD ingress |
+| 5 | Secrets (ArgoCD admin, Grafana admin, Alertmanager webhook, Thanos objstore, Policy Reporter basic auth), Kyverno ClusterPolicies |
+| 6 | Loki, ArgoCD ingress, Policy Reporter UI |
 | 7 | Prometheus |
 | 8 | Workloads, Grafana dashboards, Fluent Bit |
 | 9 | Prometheus Adapter, Alertmanager Slack |

@@ -178,6 +178,11 @@ cleanup_kubernetes_resources() {
   kubectl delete crd nodepools.karpenter.sh --ignore-not-found=true --wait=false || true
   kubectl delete crd nodeclaims.karpenter.sh --ignore-not-found=true --wait=false || true
   kubectl delete crd ec2nodeclasses.karpenter.k8s.aws --ignore-not-found=true --wait=false || true
+
+  echo "Deleting Kyverno CRDs..."
+  kubectl get crd -o name 2>/dev/null \
+    | grep -E '\.(kyverno\.io|wgpolicyk8s\.io)$' \
+    | xargs -r kubectl delete --ignore-not-found=true --wait=false || true
 }
 
 cleanup_leftover_aws_load_balancers() {

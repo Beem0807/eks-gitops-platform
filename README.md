@@ -21,6 +21,8 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 | **HPA + metrics-server** | Horizontal pod autoscaling based on CPU utilization |
 | **Loki + Fluent Bit** | Centralized log aggregation backed by S3 object storage, queryable in Grafana |
 | **Velero** | Cluster backup and restore - backs up Kubernetes resources and EBS volume snapshots to S3 |
+| **Kyverno** | Admission controller — evaluates `ClusterPolicy` rules on every pod admission and writes `PolicyReport` objects; all policies run in Audit mode by default |
+| **Policy Reporter** | Web UI for Kyverno `PolicyReport` and `ClusterPolicyReport` objects — accessible via ALB at `policy-reporter.platform.<domain>`, basic auth backed by Secrets Manager |
 
 > **Name mapping:** `SimpleTimeService` = source in `app/` = Helm release `simple-time-service` = manifest in `k8s/microservice.yaml`. All the same thing.
 
@@ -48,6 +50,7 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 | [gitops/monitoring/README.md](gitops/monitoring/README.md) | Prometheus, Grafana, Thanos, Prometheus Adapter, ServiceMonitor, EBS persistence |
 | [gitops/alerts/README.md](gitops/alerts/README.md) | PrometheusRules, Slack alerting, silencing, grouping |
 | [gitops/logs/README.md](gitops/logs/README.md) | Loki S3 backend, Fluent Bit, log querying in Grafana |
+| [gitops/security/README.md](gitops/security/README.md) | Kyverno policies, Policy Reporter UI, basic auth, inspecting policy reports |
 
 ---
 
@@ -127,6 +130,7 @@ bash terraform/scripts/bootstrap.sh
 # ArgoCD:       https://argocd.platform.<your-domain>
 # Service:      https://simple-time-service.platform.<your-domain>
 # Grafana:      https://grafana.platform.<your-domain>
+# Policy Reporter: https://policy-reporter.platform.<your-domain>
 # Prometheus:   kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 9090:9090
 # Alertmanager: kubectl port-forward svc/prometheus-kube-prometheus-alertmanager -n monitoring 9093:9093
 
@@ -143,6 +147,7 @@ Use `upgrade.sh` whenever you need to re-apply Terraform changes or rotate secre
 **When to use it:**
 - You changed a Terraform resource and want to apply it
 - You want to rotate the ArgoCD admin, Grafana admin, or Alertmanager Slack webhook secret
+- You want to rotate the Policy Reporter basic auth password
 - The ArgoCD cluster secret is stale (e.g. after a Karpenter instance profile or Thanos, Loki, or Velero bucket name change)
 
 ```bash
@@ -163,7 +168,7 @@ bash terraform/scripts/upgrade.sh
 3. Runs `terraform init` → `terraform validate` → `terraform apply`
 4. Updates kubeconfig
 5. Re-applies the ArgoCD cluster secret with the latest Terraform outputs (account ID, VPC ID, domain, Karpenter instance profile, Thanos/Loki/Velero bucket names)
-6. Force-annotates `argocd-admin`, `grafana-admin`, and `alertmanager-webhook` ExternalSecrets to trigger an immediate re-sync from Secrets Manager
+6. Force-annotates `argocd-admin`, `grafana-admin`, `alertmanager-webhook`, and `policy-reporter-basic-auth` ExternalSecrets to trigger an immediate re-sync from Secrets Manager
 
 ---
 
@@ -183,6 +188,8 @@ bash terraform/scripts/upgrade.sh
 | 10 | Thanos Query healthy | `kubectl get pods -n monitoring -l app.kubernetes.io/name=thanos-query` - `Running`; add Thanos datasource in Grafana pointing to `thanos-query.monitoring.svc:9090` |
 | 11 | EBS volumes provisioned | `kubectl get pv` - PVs for Prometheus (20Gi), Alertmanager (2Gi), Thanos Compactor (10Gi), StoreGateway (5Gi) all `Bound` |
 | 12 | Velero running | `kubectl get pods -n velero` - `Running`; `kubectl get backupstoragelocation -n velero` - `Available` |
+| 13 | Kyverno policies synced | `kubectl get clusterpolicy` — four policies listed; `kubectl get policyreport -A` — reports generated after pod activity |
+| 14 | Policy Reporter UI reachable | Open `https://policy-reporter.platform.<your-domain>` — login with credentials from `aws secretsmanager get-secret-value --secret-id policy-reporter/basic-auth` |
 
 ---
 
@@ -243,6 +250,7 @@ bash terraform/scripts/upgrade.sh
 │   │   │   ├── namespaces-project.yaml         # AppProject - cluster namespace lifecycle
 │   │   │   ├── platform-project.yaml           # AppProject - ArgoCD, infra, networking, secrets
 │   │   │   ├── observability-project.yaml      # AppProject - monitoring, logging, alerting
+│   │   │   ├── security-project.yaml           # AppProject - Kyverno admission controller and policy enforcement
 │   │   │   └── workloads-project.yaml          # AppProject - application workloads
 │   │   ├── argocd.yaml                         # Application - ArgoCD self-managed via Helm
 │   │   ├── argocd-admin-secret.yaml            # ApplicationSet - ExternalSecret for ArgoCD admin password
@@ -295,12 +303,18 @@ bash terraform/scripts/upgrade.sh
 │   │   ├── simple-time-service-alerts.yaml     # ApplicationSet - PrometheusRule (alert expressions)
 │   │   ├── alertmanager-webhook-secret.yaml    # ApplicationSet - ExternalSecret for Slack webhook
 │   │   └── alertmanager-slack.yaml             # ApplicationSet - AlertmanagerConfig (Slack routing)
-│   └── logs/
-│       ├── loki/
-│       │   ├── loki.yaml                       # ApplicationSet - Loki single-binary log store (sync-wave 3)
-│       │   └── grafana-loki-datasource.yaml    # ApplicationSet - Loki datasource ConfigMap (sync-wave 4)
-│       └── fluent-bit/
-│           └── fluent-bit.yaml                 # ApplicationSet - Fluent Bit DaemonSet (sync-wave 4)
+│   ├── logs/
+│   │   ├── loki/
+│   │   │   ├── loki.yaml                       # ApplicationSet - Loki single-binary log store (sync-wave 3)
+│   │   │   └── grafana-loki-datasource.yaml    # ApplicationSet - Loki datasource ConfigMap (sync-wave 4)
+│   │   └── fluent-bit/
+│   │       └── fluent-bit.yaml                 # ApplicationSet - Fluent Bit DaemonSet (sync-wave 4)
+│   └── security/
+│       └── kyverno/
+│           ├── kyverno.yaml                    # ApplicationSet - Kyverno admission controller (sync-wave 3)
+│           ├── kyverno-policies.yaml           # ApplicationSet - ClusterPolicy rules (sync-wave 5)
+│           ├── policy-reporter-secret.yaml     # ApplicationSet - ExternalSecret for basic auth (sync-wave 5)
+│           └── policy-reporter.yaml            # ApplicationSet - Policy Reporter UI (sync-wave 6)
 ├── scripts/
 │   ├── load_test.py                            # Python load generator (no dependencies)
 │   └── k6-staged.js                            # k6 staged ramping-arrival-rate scenario
@@ -323,7 +337,7 @@ bash terraform/scripts/upgrade.sh
     ├── thanos.tf                               # S3 bucket + IRSA roles for Thanos Prometheus sidecar, Compactor, StoreGateway
     ├── loki.tf                                 # S3 bucket + IRSA role for Loki object storage
     ├── velero.tf                               # S3 bucket + IRSA role for Velero backups
-    ├── secrets-manager.tf                      # AWS Secrets Manager secrets (ArgoCD, Grafana, Slack)
+    ├── secrets-manager.tf                      # AWS Secrets Manager secrets (ArgoCD, Grafana, Slack, Policy Reporter)
     ├── scripts/                                # Shell scripts for full GitOps lifecycle
     │   ├── bootstrap.sh                        # End-to-end: terraform + ArgoCD Helm + projects + root-app
     │   ├── upgrade.sh                          # Re-apply terraform + refresh cluster secret + force ExternalSecret sync
@@ -355,7 +369,7 @@ bash terraform/scripts/upgrade.sh
 
 These are production-grade patterns used throughout the platform, documented here to explain the reasoning.
 
-- **ArgoCD project scoping** - every ApplicationSet is assigned to one of five AppProjects (`bootstrap`, `namespaces`, `platform`, `observability`, `workloads`). Each project restricts which source repos, destination namespaces, and cluster-scoped resource kinds are permitted, preventing a misconfigured app from deploying outside its intended scope. Projects are applied by `bootstrap.sh` before the root app so they exist before ArgoCD first syncs; subsequent changes are auto-reconciled via GitOps. See [gitops/README.md](gitops/README.md#argocd-projects) for the full project breakdown.
+- **ArgoCD project scoping** - every ApplicationSet is assigned to one of six AppProjects (`bootstrap`, `namespaces`, `platform`, `observability`, `security`, `workloads`). Each project restricts which source repos, destination namespaces, and cluster-scoped resource kinds are permitted, preventing a misconfigured app from deploying outside its intended scope. Projects are applied by `bootstrap.sh` before the root app so they exist before ArgoCD first syncs; subsequent changes are auto-reconciled via GitOps. See [gitops/README.md](gitops/README.md#argocd-projects) for the full project breakdown.
 - **Core/workload node split** - managed node group nodes are tainted `app=core:NoSchedule` and run system components. Karpenter provisions separate workload nodes (tainted `app=workload:NoSchedule`) for the application. This keeps system stability independent of application scaling — a misbehaving workload cannot starve the control plane components.
 - **ArgoCD self-managed via Helm** - bootstrapped once by `bootstrap.sh`, then manages its own upgrades and config through Git (`gitops/argocd/argocd.yaml`). All ArgoCD changes are auditable and reversible via the same GitOps workflow as everything else. The initial `helm install` is unavoidable (you need the engine running before it can manage itself), but it is the only manual step.
 - **Prometheus CRDs managed separately** - `prometheus-crds.yaml` installs CRDs at sync-wave 0 before `kube-prometheus-stack`. This decouples CRD lifecycle from the operator release, allowing CRD upgrades without touching the operator and avoiding the Helm CRD upgrade limitation.
@@ -387,13 +401,14 @@ bash terraform/scripts/cleanup.sh
 cd terraform/app-bootstrap && terraform destroy
 ```
 
-The cleanup script runs five steps in order:
+The cleanup script runs six steps in order:
 
-1. **Kubernetes resources** — deletes the root app, all ArgoCD Applications and ApplicationSets, Ingresses, LoadBalancer Services, Karpenter NodePools and NodeClaims, PersistentVolumes, and all namespaces labelled `app.kubernetes.io/part-of=eks-gitops-platform` (every namespace created by the `cluster-namespaces` chart)
+1. **Kubernetes resources** — deletes the root app, all ArgoCD Applications and ApplicationSets, Ingresses, LoadBalancer Services, Karpenter NodePools and NodeClaims, PersistentVolumes, and all namespaces labelled `app.kubernetes.io/part-of=eks-gitops-platform` (including `security`) (every namespace created by the `cluster-namespaces` chart)
 2. **AWS Load Balancers** — deletes any leftover ALB/NLB/Classic ELBs tagged for the cluster that were not removed by step 1
 3. **EBS volumes and snapshots** — deletes EBS volumes tagged `kubernetes.io/cluster/<cluster>=owned` (CSI Driver PVCs with Retain policy), then deletes EBS snapshots tagged for the cluster or with a `velero.io/backup` tag
 4. **S3 buckets** — empties all versioned S3 buckets in the same region whose name contains the cluster name (Thanos, Loki, Velero), draining all object versions and delete markers in batches so that Terraform can delete the buckets cleanly
-5. **Terraform destroy** — removes all AWS resources provisioned by Terraform
+5. **Kyverno CRDs** — deletes all CRDs in the `kyverno.io` and `wgpolicyk8s.io` API groups; this is handled automatically by `cleanup.sh` using a label selector
+6. **Terraform destroy** — removes all AWS resources provisioned by Terraform
 
 > The Terraform **state bucket** is not managed by Terraform itself — delete it manually when no longer needed:
 > ```bash
@@ -417,3 +432,6 @@ The cleanup script runs five steps in order:
 | `alertmanager-slack` app degraded in ArgoCD | The Alertmanager webhook ExternalSecret failed to sync. Run `kubectl get externalsecret -n monitoring` and verify the AWS Secrets Manager secret `alertmanager-webhook` exists. |
 | Thanos pods in `CrashLoopBackOff` | Check that the `thanos-objstore-config` Secret exists in the `monitoring` namespace: `kubectl get secret thanos-objstore-config -n monitoring`. The `thanos-objstore-secret` ArgoCD app must sync before `thanos`. |
 | Prometheus Adapter not serving custom metrics | Run `kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1` to verify the API is registered. If empty, check `kubectl logs -n monitoring -l app.kubernetes.io/name=prometheus-adapter`. |
+| Policy Reporter UI returns 401 | Credentials are in AWS Secrets Manager at `policy-reporter/basic-auth`. Force a re-sync: `kubectl annotate externalsecret policy-reporter-basic-auth -n security force-sync="$(date -u +"%Y-%m-%dT%H:%M:%SZ")" --overwrite` |
+| `kubectl get clusterpolicy` returns nothing | The `kyverno-policies` ArgoCD app may not have synced. Check: `argocd app get kyverno-policies-in-cluster`. Kyverno CRDs must be registered first — confirm: `kubectl get crd | grep kyverno`. |
+| Kyverno pods crash-looping | Check resource pressure on core nodes: `kubectl top nodes -l app=core`. Kyverno admission controller requires ~128 Mi memory. Check events: `kubectl describe pods -n security -l app.kubernetes.io/name=kyverno`. |

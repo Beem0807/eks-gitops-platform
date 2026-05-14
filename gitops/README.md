@@ -77,6 +77,12 @@ gitops/
     │   └── grafana-loki-datasource.yaml         # ApplicationSet - Loki datasource ConfigMap (wave 8)
     └── fluent-bit/
         └── fluent-bit.yaml                      # ApplicationSet - Fluent Bit DaemonSet (wave 8)
+└── security/
+    └── kyverno/
+        ├── kyverno.yaml                            # ApplicationSet - Kyverno admission controller (wave 3)
+        ├── kyverno-policies.yaml                   # ApplicationSet - ClusterPolicy rules via charts/raw (wave 5)
+        ├── policy-reporter-secret.yaml             # ApplicationSet - ExternalSecret for basic auth (wave 5)
+        └── policy-reporter.yaml                    # ApplicationSet - Policy Reporter UI with ALB Ingress (wave 6)
 ```
 
 ---
@@ -93,6 +99,7 @@ gitops/
 | [monitoring/README.md](monitoring/README.md) | Prometheus, Grafana, Thanos, Prometheus Adapter, ServiceMonitor |
 | [alerts/README.md](alerts/README.md) | PrometheusRules, Slack setup, testing, silencing, grouping |
 | [logs/README.md](logs/README.md) | Loki S3 backend, Fluent Bit, Grafana datasource, LogQL queries |
+| [security/README.md](security/README.md) | Kyverno policies, Policy Reporter UI, basic auth, policy reports |
 
 ---
 
@@ -181,14 +188,18 @@ Any push to `main` affecting `gitops/` or `charts/` is automatically applied wit
 | external-dns | external-dns | platform | 2 | Route53 DNS records from Ingress/Service |
 | karpenter | karpenter | platform | 3 | Karpenter controller (workload node provisioner) |
 | velero | velero | platform | 3 | Cluster backup and restore to S3 + EBS snapshots |
+| kyverno | security | security | 3 | Kyverno admission controller — enforces ClusterPolicies cluster-wide |
 | cluster-secret-store | external-secrets | platform | 4 | ClusterSecretStore pointing to AWS Secrets Manager |
 | karpenter-nodepools | karpenter | platform | 4 | EC2NodeClass + NodePool for `t3a.medium`/`c6a.large` |
+| kyverno-policies | security | security | 5 | Four audit-mode ClusterPolicies (resource limits, privileged containers, latest tag, non-root) |
 | argocd-admin-secret | argocd | platform | 5 | Syncs ArgoCD admin password from Secrets Manager |
 | grafana-admin-secret | monitoring | observability | 5 | Syncs Grafana admin credentials from Secrets Manager |
 | alertmanager-webhook-secret | monitoring | observability | 5 | Syncs Slack webhook URL from Secrets Manager |
 | thanos-objstore-secret | monitoring | observability | 5 | S3 objstore Secret injected from cluster annotations |
 | velero-schedule | velero | platform | 5 | Daily full-cluster backup at 02:00 UTC, 30-day retention |
+| policy-reporter-secret | security | security | 5 | Syncs Policy Reporter basic auth credentials from Secrets Manager |
 | argocd-ingress | argocd | platform | 6 | ALB Ingress at `argocd.platform.<domain>` |
+| policy-reporter | security | security | 6 | Policy Reporter UI at `policy-reporter.platform.<domain>` |
 | loki | logging | observability | 6 | Loki log store |
 | prometheus | monitoring | observability | 7 | kube-prometheus-stack |
 | simple-time-service | simple-time-service | workloads | 8 | SimpleTimeService Helm chart (HPA, ALB Ingress) |
@@ -213,10 +224,10 @@ ArgoCD advances through sync waves sequentially, waiting for all resources in th
 | 0 | Prometheus CRDs | CRDs must exist before any resource of those types is applied |
 | 1 | ESO, EBS CSI, Reloader, Cluster Autoscaler | Core infrastructure with no cross-dependencies |
 | 2 | **LBC**, ExternalDNS | Network controllers given their own wave so the LBC admission webhook cert has time to propagate before any Ingress is applied |
-| 3 | Karpenter, Velero | Both install admission webhooks; a one-wave gap after LBC lets both cert chains stabilise |
+| 3 | Karpenter, Velero, **Kyverno** | All three install admission webhooks; a one-wave gap after LBC lets all webhook cert chains stabilise |
 | 4 | ClusterSecretStore, Karpenter NodePools | Require wave 1 (ESO) and wave 3 (Karpenter) webhook certs to be stable |
-| 5 | All ExternalSecrets, VeleroSchedule | Require ClusterSecretStore (wave 4) to be ready before they can sync from Secrets Manager |
-| 6 | **ArgoCD Ingress**, Loki | Ingresses applied 4 waves after LBC — webhook cert fully propagated |
+| 5 | All ExternalSecrets, VeleroSchedule, Kyverno ClusterPolicies, policy-reporter-secret | Require ClusterSecretStore (wave 4) to be ready before they can sync from Secrets Manager |
+| 6 | **ArgoCD Ingress**, Loki, Policy Reporter UI | Ingresses applied 4 waves after LBC — webhook cert fully propagated |
 | 7 | Prometheus (kube-prometheus-stack) | Requires secrets (wave 5) and LBC for Grafana Ingress (wave 2 mature) |
 | 8 | SimpleTimeService, Fluent Bit, Grafana datasource + dashboard | Require Loki (wave 6) and Prometheus (wave 7) |
 | 9 | Prometheus Adapter, AlertmanagerConfig | Require Prometheus to be running |
@@ -236,6 +247,7 @@ All ApplicationSets are scoped to one of five AppProjects defined in `gitops/arg
 | `namespaces` | `namespaces-project.yaml` | `*` | `Namespace` only | cluster-namespaces (creates namespaces + ResourceQuotas) |
 | `platform` | `platform-project.yaml` | `argocd`, `kube-system`, `karpenter`, `external-secrets`, `external-dns`, `reloader`, `velero`, `kube-node-lease` | All (`*/*`) — infra tools install CRDs and cluster RBAC | ArgoCD self-management, networking, autoscaling, secrets, storage, backup |
 | `observability` | `observability-project.yaml` | `monitoring`, `logging`, `kube-system` | `CustomResourceDefinition`, `ClusterRole`, `ClusterRoleBinding` | Prometheus, Grafana, Thanos, Loki, Fluent Bit, alerts |
+| `security` | `security-project.yaml` | `security` | `CustomResourceDefinition`, `ClusterRole`, `ClusterRoleBinding`, webhooks, `ClusterPolicy` | Kyverno admission controller, ClusterPolicies, Policy Reporter |
 | `workloads` | `workloads-project.yaml` | `simple-time-service` | None | Application workloads |
 
 The `bootstrap` project breaks the circular dependency that existed when root-app lived in the `platform` project: root-app managed the platform AppProject, but the platform AppProject governed root-app's permissions. If the platform project became misconfigured, root-app could not reconcile itself out of the problem. With root-app in its own tightly-scoped project, a broken platform project does not affect root-app — and recovering is a single `kubectl apply`.

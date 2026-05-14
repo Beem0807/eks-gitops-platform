@@ -16,9 +16,10 @@ Wave ordering ensures the ESO operator and its admission webhook are fully ready
 
 ```
 AWS Secrets Manager
-  ├── argocd-admin          (adminPasswordHash, adminPasswordMtime)
-  ├── grafana-admin         (adminUser, adminPassword)
-  └── alertmanager-webhook  (slackWebhookUrl)
+  ├── argocd-admin              (adminPasswordHash, adminPasswordMtime)
+  ├── grafana-admin             (adminUser, adminPassword)
+  ├── alertmanager-webhook      (slackWebhookUrl)
+  └── policy-reporter/basic-auth (username, password)
           │
           │  ExternalSecret (1h refresh)
           ▼
@@ -27,9 +28,10 @@ External Secrets Operator
   │  writes Kubernetes Secrets
   ▼
 Kubernetes Secrets
-  ├── argocd/argocd-secret           (admin.password, admin.passwordMtime)
-  ├── monitoring/grafana-admin       (admin-user, admin-password)
-  └── monitoring/alertmanager-webhook (slack-webhook-url)
+  ├── argocd/argocd-secret              (admin.password, admin.passwordMtime)
+  ├── monitoring/grafana-admin          (admin-user, admin-password)
+  ├── monitoring/alertmanager-webhook   (slack-webhook-url)
+  └── security/policy-reporter-basic-auth (username, password)
           │
           │  Reloader watches for changes
           ▼
@@ -48,7 +50,7 @@ Installs the controller, admission webhook, and cert-controller - all pinned to 
 | CRD install | `installCRDs: true` |
 | IRSA | `<cluster-name>-external-secrets-irsa` |
 
-The IRSA policy (in `terraform/external-secrets-irsa.tf`) allows `secretsmanager:GetSecretValue` and `secretsmanager:DescribeSecret` only on secrets tagged `ExternalSecret=true`. All three secrets provisioned by Terraform carry this tag.
+The IRSA policy (in `terraform/external-secrets-irsa.tf`) allows `secretsmanager:GetSecretValue` and `secretsmanager:DescribeSecret` only on secrets tagged `ExternalSecret=true`. All four secrets provisioned by Terraform carry this tag.
 
 Verify the operator is running:
 
@@ -95,6 +97,7 @@ Three `ExternalSecret` resources are deployed by their respective component apps
 | `argocd-admin-password` | `argocd` | `argocd-admin` | `adminPasswordHash` → `admin.password`<br>`adminPasswordMtime` → `admin.passwordMtime` | `argocd-secret` | `Merge` - patches the existing ArgoCD secret |
 | `grafana-admin` | `monitoring` | `grafana-admin` | `adminUser` → `admin-user`<br>`adminPassword` → `admin-password` | `grafana-admin` | `Owner` |
 | `alertmanager-webhook` | `monitoring` | `alertmanager-webhook` | `slackWebhookUrl` → `slack-webhook-url` | `alertmanager-webhook` | `Owner` |
+| `policy-reporter-basic-auth` | `security` | `policy-reporter/basic-auth` | `username` → `username`<br>`password` → `password` | `policy-reporter-basic-auth` | `Owner` |
 
 The ArgoCD secret uses `Merge` + `Retain` (deletion policy) because `argocd-secret` is pre-created by the ArgoCD Helm chart - ESO patches it rather than owning it.
 
@@ -117,6 +120,9 @@ kubectl annotate externalsecret grafana-admin \
 
 kubectl annotate externalsecret alertmanager-webhook \
   -n monitoring force-sync="${REFRESH_TS}" --overwrite
+
+kubectl annotate externalsecret policy-reporter-basic-auth \
+  -n security force-sync="${REFRESH_TS}" --overwrite
 ```
 
 > `upgrade.sh` does this automatically after every `terraform apply`.
@@ -139,6 +145,17 @@ kubectl annotate externalsecret grafana-admin \
 
 # 3. Reloader detects the Secret change and rolls the Grafana Deployment automatically
 kubectl rollout status deploy/prometheus-grafana -n monitoring
+```
+
+To rotate the Policy Reporter basic auth password:
+
+```bash
+aws secretsmanager put-secret-value \
+  --secret-id policy-reporter/basic-auth \
+  --secret-string '{"username":"admin","password":"<new-password>"}'
+
+kubectl annotate externalsecret policy-reporter-basic-auth \
+  -n security force-sync="$(date -u +"%Y-%m-%dT%H:%M:%SZ")" --overwrite
 ```
 
 ---
