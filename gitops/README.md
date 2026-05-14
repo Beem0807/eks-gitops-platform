@@ -14,6 +14,7 @@ gitops/
 │   └── root-app.yaml                           # Root Application - bootstraps everything below
 ├── argocd/
 │   ├── projects/
+│   │   ├── bootstrap-project.yaml              # AppProject - owns root-app only, minimal scope
 │   │   ├── platform-project.yaml               # AppProject - ArgoCD, infra, networking, secrets
 │   │   ├── observability-project.yaml          # AppProject - monitoring, logging, alerting
 │   │   └── workloads-project.yaml              # AppProject - application workloads
@@ -165,7 +166,7 @@ Any push to `main` affecting `gitops/` or `charts/` is automatically applied wit
 
 | App | Namespace | Project | Sync wave | Purpose |
 |-----|-----------|---------|-----------|---------|
-| root-app | argocd | platform | — | Discovers all other apps |
+| root-app | argocd | bootstrap | — | Discovers all other apps |
 | argocd-self | argocd | platform | — | ArgoCD self-managed via Helm |
 | prometheus-crds | monitoring | observability | 0 | Prometheus Operator CRDs (pre-installed before stack) |
 | external-secrets | external-secrets | platform | 1 | External Secrets Operator |
@@ -226,11 +227,14 @@ All ApplicationSets are scoped to one of three AppProjects defined in `gitops/ar
 
 | Project | File | Allowed namespaces | Cluster resources | Covers |
 |---------|------|--------------------|-------------------|--------|
-| `platform` | `platform-project.yaml` | `argocd`, `kube-system`, `karpenter`, `external-secrets`, `external-dns`, `reloader`, `velero` | All (`*/*`) — infra tools install CRDs and cluster RBAC | ArgoCD, bootstrap, networking, autoscaling, secrets, storage, backup |
+| `bootstrap` | `bootstrap-project.yaml` | `argocd` | None — root-app only deploys namespace-scoped ArgoCD resources | root-app only |
+| `platform` | `platform-project.yaml` | `argocd`, `kube-system`, `karpenter`, `external-secrets`, `external-dns`, `reloader`, `velero`, `kube-node-lease` | All (`*/*`) — infra tools install CRDs and cluster RBAC | ArgoCD self-management, networking, autoscaling, secrets, storage, backup |
 | `observability` | `observability-project.yaml` | `monitoring`, `logging`, `kube-system` | `CustomResourceDefinition`, `ClusterRole`, `ClusterRoleBinding` | Prometheus, Grafana, Thanos, Loki, Fluent Bit, alerts |
 | `workloads` | `workloads-project.yaml` | `simple-time-service` | None | Application workloads |
 
-**Bootstrap order:** `bootstrap.sh` applies all project manifests from `gitops/argocd/projects/` before applying `root-app.yaml`, ensuring every project exists before ArgoCD tries to sync an app that references it. After bootstrap, project changes pushed to `main` are automatically reconciled by the root app.
+The `bootstrap` project breaks the circular dependency that existed when root-app lived in the `platform` project: root-app managed the platform AppProject, but the platform AppProject governed root-app's permissions. If the platform project became misconfigured, root-app could not reconcile itself out of the problem. With root-app in its own tightly-scoped project, a broken platform project does not affect root-app — and recovering is a single `kubectl apply`.
+
+**Bootstrap order:** `bootstrap.sh` applies all project manifests from `gitops/argocd/projects/` (including `bootstrap-project.yaml`) before applying `root-app.yaml`, ensuring every project exists before ArgoCD tries to sync an app that references it. After bootstrap, project changes pushed to `main` are automatically reconciled by root-app via `ServerSideApply`.
 
 ---
 

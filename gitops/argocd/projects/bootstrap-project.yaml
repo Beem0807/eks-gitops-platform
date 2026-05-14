@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: bootstrap
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: argocd
+spec:
+  description: Owns only root-app — the app-of-apps that bootstraps the entire GitOps hierarchy. Intentionally minimal to limit blast radius.
+
+  sourceRepos:
+    - https://github.com/Beem0807/eks-gitops-platform.git
+
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: argocd
+
+  # root-app only deploys AppProjects, Applications, and ApplicationSets — all
+  # namespace-scoped resources in the argocd namespace. No cluster-scoped access needed.
+  clusterResourceWhitelist: []
+
+  orphanedResources:
+    warn: true
