@@ -320,10 +320,24 @@ cleanup_secrets_manager() {
   done
 }
 
+cleanup_cloudwatch_log_group() {
+  if [[ -z "$CLUSTER_NAME" || -z "$AWS_REGION" ]]; then
+    echo "Terraform outputs cluster_name/region not available. Skipping CloudWatch log group cleanup."
+    return 0
+  fi
+
+  local log_group="/aws/eks/${CLUSTER_NAME}/cluster"
+  echo "Deleting CloudWatch log group: $log_group"
+  aws logs delete-log-group \
+    --region "$AWS_REGION" \
+    --log-group-name "$log_group" 2>/dev/null || true
+}
+
 cleanup_kubernetes_resources
 cleanup_leftover_aws_load_balancers
 cleanup_ebs_volumes_and_snapshots
 cleanup_secrets_manager
+cleanup_cloudwatch_log_group
 
 echo "Running Terraform destroy..."
 
