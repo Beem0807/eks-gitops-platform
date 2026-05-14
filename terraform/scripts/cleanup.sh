@@ -291,39 +291,9 @@ cleanup_ebs_volumes_and_snapshots() {
   done
 }
 
-cleanup_secrets_manager() {
-  if [[ -z "$AWS_REGION" ]]; then
-    echo "AWS region not available. Skipping Secrets Manager cleanup."
-    return 0
-  fi
-
-  local secrets=(
-    "argocd-admin"
-    "grafana-admin"
-    "alertmanager-webhook"
-  )
-
-  echo "Force-deleting Secrets Manager secrets (no recovery window)..."
-  for secret in "${secrets[@]}"; do
-    if aws secretsmanager describe-secret \
-        --region "$AWS_REGION" \
-        --secret-id "$secret" \
-        >/dev/null 2>&1; then
-      echo "Deleting secret: $secret"
-      aws secretsmanager delete-secret \
-        --region "$AWS_REGION" \
-        --secret-id "$secret" \
-        --force-delete-without-recovery || true
-    else
-      echo "Secret not found (already deleted): $secret"
-    fi
-  done
-}
-
 cleanup_kubernetes_resources
 cleanup_leftover_aws_load_balancers
 cleanup_ebs_volumes_and_snapshots
-cleanup_secrets_manager
 
 echo "Running Terraform destroy..."
 

@@ -5,8 +5,9 @@ resource "time_static" "argocd_admin_password_mtime" {
 }
 
 resource "aws_secretsmanager_secret" "argocd_admin" {
-  name        = "argocd-admin"
-  description = "Argo CD admin password"
+  name                    = "argocd-admin"
+  description             = "Argo CD admin password"
+  recovery_window_in_days = 0
 
   tags = merge(var.tags, {
     ExternalSecret = "true"
@@ -30,8 +31,9 @@ resource "aws_secretsmanager_secret_version" "argocd_admin" {
 }
 
 resource "aws_secretsmanager_secret" "grafana_admin" {
-  name        = "grafana-admin"
-  description = "Grafana admin credentials"
+  name                    = "grafana-admin"
+  description             = "Grafana admin credentials"
+  recovery_window_in_days = 0
 
   tags = merge(var.tags, {
     ExternalSecret = "true"
@@ -48,8 +50,9 @@ resource "aws_secretsmanager_secret_version" "grafana_admin" {
 }
 
 resource "aws_secretsmanager_secret" "alertmanager_webhook" {
-  name        = "alertmanager-webhook"
-  description = "Alertmanager Slack webhook URL"
+  name                    = "alertmanager-webhook"
+  description             = "Alertmanager Slack webhook URL"
+  recovery_window_in_days = 0
 
   tags = merge(var.tags, {
     ExternalSecret = "true"
