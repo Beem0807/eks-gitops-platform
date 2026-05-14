@@ -49,6 +49,12 @@ cleanup_kubernetes_resources() {
     --region "$AWS_REGION" \
     --name "$CLUSTER_NAME" || true
 
+  echo "Checking Kubernetes API server connectivity..."
+  if ! kubectl cluster-info --request-timeout=15s >/dev/null 2>&1; then
+    echo "WARNING: Kubernetes API server unreachable (cluster may already be deleted). Skipping Kubernetes resource cleanup."
+    return 0
+  fi
+
   echo "Deleting Argo CD root app if present..."
   kubectl delete app root-app \
     -n "$ARGOCD_NS" \
@@ -78,7 +84,6 @@ cleanup_kubernetes_resources() {
 
   echo "Deleting Kubernetes LoadBalancer Services before namespaces..."
   kubectl delete service \
-    --all \
     --all-namespaces \
     --field-selector spec.type=LoadBalancer \
     --ignore-not-found=true \
@@ -288,9 +293,108 @@ cleanup_ebs_volumes_and_snapshots() {
   done
 }
 
+cleanup_s3_buckets() {
+  if [[ -z "$AWS_REGION" ]]; then
+    echo "AWS_REGION not available. Skipping S3 bucket cleanup."
+    return 0
+  fi
+
+  echo "Finding S3 buckets tagged for cluster cleanup..."
+
+  ALL_BUCKETS="$(aws s3api list-buckets \
+    --query "Buckets[].Name" \
+    --output text 2>/dev/null || true)"
+
+  for bucket in $ALL_BUCKETS; do
+    BUCKET_REGION="$(aws s3api get-bucket-location \
+      --bucket "$bucket" \
+      --query "LocationConstraint" \
+      --output text 2>/dev/null || true)"
+
+    # Normalize us-east-1 which returns "None"
+    [[ "$BUCKET_REGION" == "None" ]] && BUCKET_REGION="us-east-1"
+
+    [[ "$BUCKET_REGION" != "$AWS_REGION" ]] && continue
+
+    TAGS="$(aws s3api get-bucket-tagging \
+      --bucket "$bucket" \
+      --region "$AWS_REGION" \
+      --output json 2>/dev/null || true)"
+
+    CLUSTER_TAG="$(echo "$TAGS" \
+      | python3 -c "
+import sys, json
+tags = json.load(sys.stdin).get('TagSet', [])
+print(next((t['Value'] for t in tags if t['Key'] in ('kubernetes.io/cluster/${CLUSTER_NAME}', 'velero-cluster', 'Cluster')), ''))
+" 2>/dev/null || true)"
+
+    VELERO_TAG="$(echo "$TAGS" \
+      | python3 -c "
+import sys, json
+tags = json.load(sys.stdin).get('TagSet', [])
+print(next((t['Value'] for t in tags if 'velero' in t['Key'].lower()), ''))
+" 2>/dev/null || true)"
+
+    NAME_MATCH=false
+    [[ -n "$CLUSTER_NAME" && "$bucket" == *"$CLUSTER_NAME"* ]] && NAME_MATCH=true
+    [[ "$bucket" == *"velero"* && -n "$CLUSTER_NAME" ]] && NAME_MATCH=true
+
+    if [[ -n "$CLUSTER_TAG" || -n "$VELERO_TAG" || "$NAME_MATCH" == "true" ]]; then
+      echo "Emptying versioned S3 bucket: $bucket"
+
+      # Delete all object versions in batches
+      while true; do
+        VERSIONS="$(aws s3api list-object-versions \
+          --bucket "$bucket" \
+          --region "$AWS_REGION" \
+          --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}}' \
+          --max-items 1000 \
+          --output json 2>/dev/null || true)"
+
+        OBJECT_COUNT="$(echo "$VERSIONS" \
+          | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('Objects') or []))" 2>/dev/null || echo 0)"
+
+        [[ "$OBJECT_COUNT" == "0" ]] && break
+
+        echo "  Deleting $OBJECT_COUNT versions..."
+        echo "$VERSIONS" | aws s3api delete-objects \
+          --bucket "$bucket" \
+          --region "$AWS_REGION" \
+          --delete file:///dev/stdin \
+          --output text >/dev/null || true
+      done
+
+      # Delete all delete markers in batches
+      while true; do
+        MARKERS="$(aws s3api list-object-versions \
+          --bucket "$bucket" \
+          --region "$AWS_REGION" \
+          --query '{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' \
+          --max-items 1000 \
+          --output json 2>/dev/null || true)"
+
+        MARKER_COUNT="$(echo "$MARKERS" \
+          | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('Objects') or []))" 2>/dev/null || echo 0)"
+
+        [[ "$MARKER_COUNT" == "0" ]] && break
+
+        echo "  Deleting $MARKER_COUNT delete markers..."
+        echo "$MARKERS" | aws s3api delete-objects \
+          --bucket "$bucket" \
+          --region "$AWS_REGION" \
+          --delete file:///dev/stdin \
+          --output text >/dev/null || true
+      done
+
+      echo "  Bucket $bucket is now empty."
+    fi
+  done
+}
+
 cleanup_kubernetes_resources
 cleanup_leftover_aws_load_balancers
 cleanup_ebs_volumes_and_snapshots
+cleanup_s3_buckets
 
 echo "Running Terraform destroy..."
 

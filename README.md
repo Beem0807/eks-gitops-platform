@@ -387,19 +387,17 @@ bash terraform/scripts/cleanup.sh
 cd terraform/app-bootstrap && terraform destroy
 ```
 
-The cleanup script runs four steps in order:
+The cleanup script runs five steps in order:
 
 1. **Kubernetes resources** — deletes the root app, all ArgoCD Applications and ApplicationSets, Ingresses, LoadBalancer Services, Karpenter NodePools and NodeClaims, PersistentVolumes, and all namespaces labelled `app.kubernetes.io/part-of=eks-gitops-platform` (every namespace created by the `cluster-namespaces` chart)
 2. **AWS Load Balancers** — deletes any leftover ALB/NLB/Classic ELBs tagged for the cluster that were not removed by step 1
 3. **EBS volumes and snapshots** — deletes EBS volumes tagged `kubernetes.io/cluster/<cluster>=owned` (CSI Driver PVCs with Retain policy), then deletes EBS snapshots tagged for the cluster or with a `velero.io/backup` tag
-4. **Terraform destroy** — removes all AWS resources provisioned by Terraform
+4. **S3 buckets** — empties all versioned S3 buckets in the same region whose name contains the cluster name (Thanos, Loki, Velero), draining all object versions and delete markers in batches so that Terraform can delete the buckets cleanly
+5. **Terraform destroy** — removes all AWS resources provisioned by Terraform
 
-> The following S3 buckets are **not** removed by `terraform destroy` — delete them manually when no longer needed:
+> The Terraform **state bucket** is not managed by Terraform itself — delete it manually when no longer needed:
 > ```bash
 > aws s3 rb s3://<your-state-bucket> --force
-> aws s3 rb s3://<cluster-name>-thanos-metrics-<account-id>-<region> --force
-> aws s3 rb s3://<cluster-name>-loki-logs-<account-id>-<region> --force
-> aws s3 rb s3://<cluster-name>-velero-backups-<account-id>-<region> --force
 > ```
 
 ---
