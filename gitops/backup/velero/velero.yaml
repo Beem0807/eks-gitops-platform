@@ -78,10 +78,9 @@ spec:
                 value: core
                 effect: NoSchedule
 
-            kubectl:
-              image:
-                repository: docker.io/alpine/k8s
-                tag: "1.34.7"
+            # The upgrade-crds hook job expects /tmp/sh which is bitnami-specific.
+            # CRDs are managed by the chart install/upgrade — disable the hook.
+            upgradeCRDs: false
 
             metrics:
               enabled: true
