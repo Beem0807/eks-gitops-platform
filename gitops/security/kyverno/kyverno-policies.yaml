@@ -55,6 +55,7 @@ spec:
                 spec:
                   validationFailureAction: Audit
                   background: true
+                  skipBackgroundRequests: true
                   rules:
                     - name: validate-resource-limits
                       match:
@@ -92,6 +93,7 @@ spec:
                 spec:
                   validationFailureAction: Audit
                   background: true
+                  skipBackgroundRequests: true
                   rules:
                     - name: privileged-containers
                       match:
@@ -131,6 +133,7 @@ spec:
                 spec:
                   validationFailureAction: Audit
                   background: true
+                  skipBackgroundRequests: true
                   rules:
                     - name: require-image-tag
                       match:
@@ -176,6 +179,7 @@ spec:
                 spec:
                   validationFailureAction: Audit
                   background: true
+                  skipBackgroundRequests: true
                   rules:
                     - name: check-run-as-non-root
                       match:
