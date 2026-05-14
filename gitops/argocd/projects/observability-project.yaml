@@ -23,6 +23,12 @@ spec:
       namespace: monitoring
     - server: https://kubernetes.default.svc
       namespace: logging
+    - server: https://kubernetes.default.svc
+      namespace: kube-system
+
+  # kube-system destination is required by kube-prometheus-stack: the chart creates
+  # headless Services there (e.g. prometheus-kube-prometheus-coredns, -kubelet) so
+  # Prometheus can discover and scrape kube-system components via ServiceMonitors.
 
   # Cluster-scoped resources required by the observability stack:
   # - Prometheus Operator: CRDs, ClusterRole/Binding, admission webhooks

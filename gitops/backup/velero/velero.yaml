@@ -4,7 +4,7 @@ metadata:
   name: velero
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/sync-wave: "3"
   labels:
     app.kubernetes.io/part-of: eks-gitops-platform
     app.kubernetes.io/managed-by: argocd
@@ -77,6 +77,10 @@ spec:
                 operator: Equal
                 value: core
                 effect: NoSchedule
+
+            kubectl:
+              image:
+                tag: "latest"
 
             metrics:
               enabled: true

@@ -4,7 +4,7 @@ metadata:
   name: prometheus-adapter
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "5"
+    argocd.argoproj.io/sync-wave: "9"
   labels:
     app.kubernetes.io/part-of: eks-gitops-platform
     app.kubernetes.io/managed-by: argocd

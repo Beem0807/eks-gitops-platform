@@ -4,8 +4,8 @@ The `gitops/backup/` directory deploys Velero via ArgoCD, providing cluster-leve
 
 | File | What it deploys | Sync wave | Namespace |
 |------|----------------|-----------|-----------|
-| `velero/velero.yaml` | Velero v8.1.0 + AWS plugin v1.10.0 - backup controller, BackupStorageLocation (S3), VolumeSnapshotLocation (EBS) | 2 | `velero` |
-| `velero/velero-schedule.yaml` | Velero `Schedule` resource - daily full-cluster backup at 02:00 UTC, 30-day retention | 3 | `velero` |
+| `velero/velero.yaml` | Velero v8.1.0 + AWS plugin v1.10.0 - backup controller, BackupStorageLocation (S3), VolumeSnapshotLocation (EBS) | 3 | `velero` |
+| `velero/velero-schedule.yaml` | Velero `Schedule` resource - daily full-cluster backup at 02:00 UTC, 30-day retention | 5 | `velero` |
 
 ---
 
@@ -99,7 +99,7 @@ velero restore logs <restore-name>
 
 ## Scheduled backup
 
-A `Schedule` named `daily-backup` is deployed automatically via `velero/velero-schedule.yaml` (sync-wave 3, after Velero is running). It runs every day at **02:00 UTC** and backs up all namespaces and cluster-scoped resources, with a **30-day TTL**.
+A `Schedule` named `daily-backup` is deployed automatically via `velero/velero-schedule.yaml` (sync-wave 5, after Velero at wave 3 is running). It runs every day at **02:00 UTC** and backs up all namespaces and cluster-scoped resources, with a **30-day TTL**.
 
 | Setting | Value |
 |---------|-------|

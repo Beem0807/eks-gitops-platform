@@ -18,60 +18,61 @@ gitops/
 │   │   ├── observability-project.yaml          # AppProject - monitoring, logging, alerting
 │   │   └── workloads-project.yaml              # AppProject - application workloads
 │   ├── argocd.yaml                             # Application - ArgoCD self-managed via Helm
-│   ├── argocd-admin-secret.yaml                # ApplicationSet - ExternalSecret for ArgoCD admin password
-│   └── argocd-ingress.yaml                     # ApplicationSet - ALB Ingress at argocd.platform.<domain>
+│   ├── argocd-admin-secret.yaml                # ApplicationSet - ExternalSecret for ArgoCD admin password (wave 5)
+│   └── argocd-ingress.yaml                     # ApplicationSet - ALB Ingress at argocd.platform.<domain> (wave 6)
 ├── app/
 │   └── simple-time-service/
-│       └── simple-time-service.yaml            # ApplicationSet - Helm deploy with ALB Ingress
+│       └── simple-time-service.yaml            # ApplicationSet - Helm deploy with ALB Ingress (wave 8)
 ├── auto-scaling/
 │   ├── cluster-autoscaler/
 │   │   └── cluster-autoscaler.yaml             # ApplicationSet - Cluster Autoscaler (wave 1)
 │   ├── karpenter/
-│   │   ├── karpenter.yaml                      # ApplicationSet - Karpenter controller (wave 2)
-│   │   └── karpenter-nodepools.yaml            # ApplicationSet - EC2NodeClass + NodePool (wave 3)
+│   │   ├── karpenter.yaml                      # ApplicationSet - Karpenter controller (wave 3)
+│   │   └── karpenter-nodepools.yaml            # ApplicationSet - EC2NodeClass + NodePool (wave 4)
 │   └── metrics-server/
 │       └── metrics-server.yaml                 # ApplicationSet - metrics-server (HPA prerequisite)
 ├── networking/
 │   ├── ingress-controller/
-│   │   └── aws-load-balancer-controller.yaml   # ApplicationSet - AWS Load Balancer Controller (wave 1)
+│   │   └── aws-load-balancer-controller.yaml   # ApplicationSet - AWS Load Balancer Controller (wave 2)
 │   └── external-dns/
-│       └── external-dns.yaml                   # ApplicationSet - ExternalDNS for Route53 (wave 1)
+│       └── external-dns.yaml                   # ApplicationSet - ExternalDNS for Route53 (wave 2)
 ├── storage/
 │   ├── README.md
 │   └── ebs-csi-driver/
 │       └── ebs-csi-driver.yaml                 # ApplicationSet - AWS EBS CSI Driver (wave 1)
+
 ├── backup/
 │   ├── README.md
 │   └── velero/
-│       ├── velero.yaml                         # ApplicationSet - Velero backup and restore (wave 2)
-│       └── velero-schedule.yaml                # ApplicationSet - daily full-cluster backup Schedule (wave 3)
+│       ├── velero.yaml                         # ApplicationSet - Velero backup and restore (wave 3)
+│       └── velero-schedule.yaml                # ApplicationSet - daily full-cluster backup Schedule (wave 5)
 ├── secrets/
 │   ├── external-secrets/
 │   │   ├── external-secret-operator.yaml       # ApplicationSet - External Secrets Operator (wave 1)
-│   │   └── cluster-secret-store.yaml           # ApplicationSet - ClusterSecretStore (wave 2)
+│   │   └── cluster-secret-store.yaml           # ApplicationSet - ClusterSecretStore (wave 4)
 │   └── reloader/
 │       └── reloader.yaml                       # ApplicationSet - Stakater Reloader (wave 1)
 ├── monitoring/
 │   ├── prometheus/
 │   │   ├── prometheus-crds.yaml                # ApplicationSet - Prometheus Operator CRDs (wave 0)
-│   │   ├── prometheus.yaml                     # ApplicationSet - kube-prometheus-stack (wave 4)
-│   │   └── prometheus-adapter.yaml             # ApplicationSet - custom metrics API bridge (wave 5)
+│   │   ├── prometheus.yaml                     # ApplicationSet - kube-prometheus-stack (wave 7)
+│   │   └── prometheus-adapter.yaml             # ApplicationSet - custom metrics API bridge (wave 9)
 │   ├── thanos/
-│   │   ├── thanos-objstore-secret.yaml         # ApplicationSet - S3 objstore Secret (wave 3)
-│   │   └── thanos.yaml                         # ApplicationSet - Thanos query/compactor/storegateway (wave 6)
+│   │   ├── thanos-objstore-secret.yaml         # ApplicationSet - S3 objstore Secret (wave 5)
+│   │   └── thanos.yaml                         # ApplicationSet - Thanos query/compactor/storegateway (wave 10)
 │   └── grafana/
-│       ├── grafana-admin-secret.yaml           # ApplicationSet - ExternalSecret for Grafana credentials
-│       └── simple-time-service-dashboard.yaml  # ApplicationSet - Grafana dashboard ConfigMap (wave 2)
+│       ├── grafana-admin-secret.yaml           # ApplicationSet - ExternalSecret for Grafana credentials (wave 5)
+│       └── simple-time-service-dashboard.yaml  # ApplicationSet - Grafana dashboard ConfigMap (wave 8)
 ├── alerts/
-│   ├── simple-time-service-alerts.yaml         # ApplicationSet - PrometheusRule (alert expressions)
-│   ├── alertmanager-webhook-secret.yaml        # ApplicationSet - ExternalSecret for Slack webhook
-│   └── alertmanager-slack.yaml                 # ApplicationSet - AlertmanagerConfig (Slack routing)
+│   ├── simple-time-service-alerts.yaml         # ApplicationSet - PrometheusRule (alert expressions) (wave 10)
+│   ├── alertmanager-webhook-secret.yaml        # ApplicationSet - ExternalSecret for Slack webhook (wave 5)
+│   └── alertmanager-slack.yaml                 # ApplicationSet - AlertmanagerConfig (Slack routing) (wave 9)
 └── logs/
     ├── loki/
-    │   ├── loki.yaml                            # ApplicationSet - Loki single-binary log store (wave 3)
-    │   └── grafana-loki-datasource.yaml         # ApplicationSet - Loki datasource ConfigMap (wave 4)
+    │   ├── loki.yaml                            # ApplicationSet - Loki single-binary log store (wave 6)
+    │   └── grafana-loki-datasource.yaml         # ApplicationSet - Loki datasource ConfigMap (wave 8)
     └── fluent-bit/
-        └── fluent-bit.yaml                      # ApplicationSet - Fluent Bit DaemonSet (wave 4)
+        └── fluent-bit.yaml                      # ApplicationSet - Fluent Bit DaemonSet (wave 8)
 ```
 
 ---
@@ -166,34 +167,56 @@ Any push to `main` affecting `gitops/` or `charts/` is automatically applied wit
 |-----|-----------|---------|-----------|---------|
 | root-app | argocd | platform | — | Discovers all other apps |
 | argocd-self | argocd | platform | — | ArgoCD self-managed via Helm |
-| argocd-admin-secret | argocd | platform | 3 | Syncs ArgoCD admin password from Secrets Manager |
-| argocd-ingress | argocd | platform | 2 | ALB Ingress at `argocd.platform.<domain>` |
-| external-secrets | external-secrets | platform | 1 | External Secrets Operator |
-| cluster-secret-store | external-secrets | platform | 2 | ClusterSecretStore pointing to AWS Secrets Manager |
-| reloader | reloader | platform | 1 | Stakater Reloader (watches Secrets/ConfigMaps) |
-| aws-load-balancer-controller | kube-system | platform | 1 | ALB Ingress controller |
-| aws-ebs-csi-driver | kube-system | platform | 1 | EBS volumes + `gp3` default StorageClass |
-| velero | velero | platform | 2 | Cluster backup and restore to S3 + EBS snapshots |
-| velero-schedule | velero | platform | 3 | Daily full-cluster backup at 02:00 UTC, 30-day retention |
-| external-dns | external-dns | platform | 1 | Route53 DNS records from Ingress/Service |
-| cluster-autoscaler | kube-system | platform | 1 | Scales managed node group on pending pods |
-| karpenter | karpenter | platform | 2 | Karpenter controller (workload node provisioner) |
-| karpenter-nodepools | karpenter | platform | 3 | EC2NodeClass + NodePool for `t3a.medium`/`c6a.large` |
-| metrics-server | kube-system | platform | — | CPU/memory metrics for HPA |
 | prometheus-crds | monitoring | observability | 0 | Prometheus Operator CRDs (pre-installed before stack) |
-| prometheus | monitoring | observability | 4 | kube-prometheus-stack |
-| prometheus-adapter | monitoring | observability | 5 | Custom metrics API bridge (enables custom-metric HPA) |
-| thanos-objstore-secret | monitoring | observability | 3 | S3 objstore Secret injected from cluster annotations |
-| thanos | monitoring | observability | 6 | Thanos Query, Compactor, StoreGateway |
-| grafana-admin-secret | monitoring | observability | 3 | Syncs Grafana admin credentials from Secrets Manager |
-| grafana-dashboard | monitoring | observability | 2 | SimpleTimeService dashboard ConfigMap |
-| simple-time-service-alerts | monitoring | observability | 5 | PrometheusRule CRD |
-| alertmanager-webhook-secret | monitoring | observability | 3 | Syncs Slack webhook URL from Secrets Manager |
-| alertmanager-slack | monitoring | observability | 4 | AlertmanagerConfig CRD |
-| loki | logging | observability | 3 | Loki log store |
-| fluent-bit | logging | observability | 4 | Log collector DaemonSet |
-| grafana-loki-datasource | monitoring | observability | 4 | Loki datasource ConfigMap |
-| simple-time-service | simple-time-service | workloads | 4 | SimpleTimeService Helm chart (HPA, ALB Ingress) |
+| external-secrets | external-secrets | platform | 1 | External Secrets Operator |
+| aws-ebs-csi-driver | kube-system | platform | 1 | EBS volumes + `gp3` default StorageClass |
+| reloader | reloader | platform | 1 | Stakater Reloader (watches Secrets/ConfigMaps) |
+| cluster-autoscaler | kube-system | platform | 1 | Scales managed node group on pending pods |
+| aws-load-balancer-controller | kube-system | platform | 2 | ALB Ingress controller (webhook cert propagates before wave 6 Ingresses) |
+| external-dns | external-dns | platform | 2 | Route53 DNS records from Ingress/Service |
+| karpenter | karpenter | platform | 3 | Karpenter controller (workload node provisioner) |
+| velero | velero | platform | 3 | Cluster backup and restore to S3 + EBS snapshots |
+| cluster-secret-store | external-secrets | platform | 4 | ClusterSecretStore pointing to AWS Secrets Manager |
+| karpenter-nodepools | karpenter | platform | 4 | EC2NodeClass + NodePool for `t3a.medium`/`c6a.large` |
+| argocd-admin-secret | argocd | platform | 5 | Syncs ArgoCD admin password from Secrets Manager |
+| grafana-admin-secret | monitoring | observability | 5 | Syncs Grafana admin credentials from Secrets Manager |
+| alertmanager-webhook-secret | monitoring | observability | 5 | Syncs Slack webhook URL from Secrets Manager |
+| thanos-objstore-secret | monitoring | observability | 5 | S3 objstore Secret injected from cluster annotations |
+| velero-schedule | velero | platform | 5 | Daily full-cluster backup at 02:00 UTC, 30-day retention |
+| argocd-ingress | argocd | platform | 6 | ALB Ingress at `argocd.platform.<domain>` |
+| loki | logging | observability | 6 | Loki log store |
+| prometheus | monitoring | observability | 7 | kube-prometheus-stack |
+| simple-time-service | simple-time-service | workloads | 8 | SimpleTimeService Helm chart (HPA, ALB Ingress) |
+| fluent-bit | logging | observability | 8 | Log collector DaemonSet |
+| grafana-loki-datasource | monitoring | observability | 8 | Loki datasource ConfigMap |
+| grafana-dashboard | monitoring | observability | 8 | SimpleTimeService dashboard ConfigMap |
+| prometheus-adapter | monitoring | observability | 9 | Custom metrics API bridge (enables custom-metric HPA) |
+| alertmanager-slack | monitoring | observability | 9 | AlertmanagerConfig CRD |
+| simple-time-service-alerts | monitoring | observability | 10 | PrometheusRule CRD |
+| thanos | monitoring | observability | 10 | Thanos Query, Compactor, StoreGateway |
+| metrics-server | kube-system | platform | — | CPU/memory metrics for HPA |
+
+---
+
+## Sync wave strategy
+
+ArgoCD advances through sync waves sequentially, waiting for all resources in the current wave to be healthy before starting the next. The wave ordering is designed to eliminate race conditions caused by admission webhook cert propagation and operator readiness.
+
+| Wave | Components | Why this boundary |
+|------|-----------|-------------------|
+| 0 | Prometheus CRDs | CRDs must exist before any resource of those types is applied |
+| 1 | ESO, EBS CSI, Reloader, Cluster Autoscaler | Core infrastructure with no cross-dependencies |
+| 2 | **LBC**, ExternalDNS | Network controllers given their own wave so the LBC admission webhook cert has time to propagate before any Ingress is applied |
+| 3 | Karpenter, Velero | Both install admission webhooks; a one-wave gap after LBC lets both cert chains stabilise |
+| 4 | ClusterSecretStore, Karpenter NodePools | Require wave 1 (ESO) and wave 3 (Karpenter) webhook certs to be stable |
+| 5 | All ExternalSecrets, VeleroSchedule | Require ClusterSecretStore (wave 4) to be ready before they can sync from Secrets Manager |
+| 6 | **ArgoCD Ingress**, Loki | Ingresses applied 4 waves after LBC — webhook cert fully propagated |
+| 7 | Prometheus (kube-prometheus-stack) | Requires secrets (wave 5) and LBC for Grafana Ingress (wave 2 mature) |
+| 8 | SimpleTimeService, Fluent Bit, Grafana datasource + dashboard | Require Loki (wave 6) and Prometheus (wave 7) |
+| 9 | Prometheus Adapter, AlertmanagerConfig | Require Prometheus to be running |
+| 10 | PrometheusRules, Thanos | Require Prometheus with Thanos sidecar healthy |
+
+> **Note:** The `loki`, `fluent-bit`, `grafana-loki-datasource`, and `simple-time-service-alerts` ApplicationSets previously had their sync-wave annotation only on the inner Application template rather than on the ApplicationSet itself, meaning root-app treated them as wave 0. The annotation is now correctly placed on `metadata.annotations` of each ApplicationSet.
 
 ---
 
@@ -204,7 +227,7 @@ All ApplicationSets are scoped to one of three AppProjects defined in `gitops/ar
 | Project | File | Allowed namespaces | Cluster resources | Covers |
 |---------|------|--------------------|-------------------|--------|
 | `platform` | `platform-project.yaml` | `argocd`, `kube-system`, `karpenter`, `external-secrets`, `external-dns`, `reloader`, `velero` | All (`*/*`) — infra tools install CRDs and cluster RBAC | ArgoCD, bootstrap, networking, autoscaling, secrets, storage, backup |
-| `observability` | `observability-project.yaml` | `monitoring`, `logging` | `CustomResourceDefinition`, `ClusterRole`, `ClusterRoleBinding` | Prometheus, Grafana, Thanos, Loki, Fluent Bit, alerts |
+| `observability` | `observability-project.yaml` | `monitoring`, `logging`, `kube-system` | `CustomResourceDefinition`, `ClusterRole`, `ClusterRoleBinding` | Prometheus, Grafana, Thanos, Loki, Fluent Bit, alerts |
 | `workloads` | `workloads-project.yaml` | `simple-time-service` | None | Application workloads |
 
 **Bootstrap order:** `bootstrap.sh` applies all project manifests from `gitops/argocd/projects/` before applying `root-app.yaml`, ensuring every project exists before ArgoCD tries to sync an app that references it. After bootstrap, project changes pushed to `main` are automatically reconciled by the root app.

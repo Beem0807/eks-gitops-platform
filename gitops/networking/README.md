@@ -4,10 +4,12 @@ The `gitops/networking/` directory deploys two ArgoCD apps that together handle 
 
 | File | What it deploys | Sync wave | Namespace |
 |------|----------------|-----------|-----------|
-| `ingress-controller/aws-load-balancer-controller.yaml` | AWS Load Balancer Controller v1.8.1 - provisions ALBs from Ingress resources | 1 | `kube-system` |
-| `external-dns/external-dns.yaml` | ExternalDNS v1.15.0 - creates Route53 records from Ingress/Service annotations | 1 | `external-dns` |
+| `ingress-controller/aws-load-balancer-controller.yaml` | AWS Load Balancer Controller v1.8.1 - provisions ALBs from Ingress resources | 2 | `kube-system` |
+| `external-dns/external-dns.yaml` | ExternalDNS v1.15.0 - creates Route53 records from Ingress/Service annotations | 2 | `external-dns` |
 
 Both run on core nodes and use IRSA for AWS API access.
+
+> **Why wave 2?** LBC generates a self-signed CA and injects it into its `ValidatingWebhookConfiguration` after the pod starts. If an Ingress resource is applied before the cert is propagated, the Kubernetes API server rejects the admission webhook call with `x509: certificate signed by unknown authority`. Putting LBC in wave 2 (its own wave, ahead of all Ingresses at wave 6) ensures the webhook is fully initialised before any Ingress is created.
 
 ---
 
@@ -139,3 +141,4 @@ aws route53 list-resource-record-sets \
 | DNS not resolving | Check ExternalDNS logs for Route53 API errors. Confirm `domain-name` annotation on the ArgoCD cluster secret matches the actual hosted zone. |
 | DNS resolves but certificate error | The ACM certificate must cover the hostname (wildcard `*.platform.<domain>` recommended). Check ALB listener certificate in the AWS console. |
 | `kubectl get ingress` shows no `ADDRESS` | ALB provisioning in progress - takes 1–3 minutes. Check LBC logs for errors. |
+| Webhook error: `x509: certificate signed by unknown authority` | LBC webhook cert not yet propagated. This is prevented by the wave gap (LBC at wave 2, Ingresses at wave 6+), but can still occur if ArgoCD is force-synced out of order. Wait for LBC pods to be fully ready before re-syncing. |

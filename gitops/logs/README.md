@@ -34,9 +34,9 @@ Sync-wave ordering ensures Loki is running before Fluent Bit and the datasource 
 
 | Component | Sync wave |
 |-----------|-----------|
-| Loki | 3 |
-| Fluent Bit | 4 |
-| Grafana Loki datasource | 4 |
+| Loki | 6 |
+| Fluent Bit | 8 |
+| Grafana Loki datasource | 8 |
 
 ---
 

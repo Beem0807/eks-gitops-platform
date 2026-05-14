@@ -5,10 +5,10 @@ The `gitops/secrets/` directory deploys three ArgoCD apps that together handle s
 | File | What it deploys | Sync wave | Namespace |
 |------|----------------|-----------|-----------|
 | `external-secrets/external-secret-operator.yaml` | External Secrets Operator v0.10.7 - controller, webhook, cert-controller | 1 | `external-secrets` |
-| `external-secrets/cluster-secret-store.yaml` | `ClusterSecretStore` named `aws-secrets-manager` - cluster-wide AWS Secrets Manager backend | 2 | `external-secrets` |
+| `external-secrets/cluster-secret-store.yaml` | `ClusterSecretStore` named `aws-secrets-manager` - cluster-wide AWS Secrets Manager backend | 4 | `external-secrets` |
 | `reloader/reloader.yaml` | Stakater Reloader v1.1.0 - rolls Deployments when referenced Secrets or ConfigMaps change | 1 | `reloader` |
 
-Wave ordering ensures the operator and its CRDs are ready before the `ClusterSecretStore` is applied.
+Wave ordering ensures the ESO operator and its admission webhook are fully ready before the `ClusterSecretStore` (wave 4) is applied, and the `ClusterSecretStore` is ready before any `ExternalSecret` (wave 5) tries to use it.
 
 ---
 
@@ -190,4 +190,4 @@ kubectl logs -n reloader -l app=reloader --tail=50
 | ExternalSecret stuck in `SecretSyncedError` | Run `kubectl describe externalsecret <name> -n <namespace>` for the exact error. Common causes: Secrets Manager secret does not exist, missing `ExternalSecret=true` tag, or wrong property key name. |
 | ExternalSecret `Ready` but pod not updated | Reloader is responsible for the rollout. Confirm the Deployment has the `reloader.stakater.com/auto: "true"` annotation and Reloader is running. |
 | Secret not refreshing after Secrets Manager update | The refresh interval is 1h. Force an immediate sync with the `force-sync` annotation (see above), or use `upgrade.sh`. |
-| `argocd-secret` patch fails | The `Merge` creation policy requires the target secret to already exist. Ensure ArgoCD has fully initialised before the `argocd-admin-password` ExternalSecret syncs (sync-wave 3 ensures this). |
+| `argocd-secret` patch fails | The `Merge` creation policy requires the target secret to already exist. Ensure ArgoCD has fully initialised before the `argocd-admin-password` ExternalSecret syncs (sync-wave 5 ensures this). |

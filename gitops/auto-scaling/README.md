@@ -5,11 +5,11 @@ The `gitops/auto-scaling/` directory deploys four ArgoCD apps that together hand
 | File | What it deploys | Sync wave | Namespace |
 |------|----------------|-----------|-----------|
 | `cluster-autoscaler/cluster-autoscaler.yaml` | Cluster Autoscaler v1.33.0 - scales the core managed node group | 1 | `kube-system` |
-| `karpenter/karpenter.yaml` | Karpenter v1.0.8 controller - provisions workload nodes on demand | 2 | `karpenter` |
-| `karpenter/karpenter-nodepools.yaml` | `EC2NodeClass` + `NodePool` for workload nodes | 3 | `karpenter` |
+| `karpenter/karpenter.yaml` | Karpenter v1.0.8 controller - provisions workload nodes on demand | 3 | `karpenter` |
+| `karpenter/karpenter-nodepools.yaml` | `EC2NodeClass` + `NodePool` for workload nodes | 4 | `karpenter` |
 | `metrics-server/metrics-server.yaml` | metrics-server v3.12.2 - CPU/memory metrics API required by HPA | — | `kube-system` |
 
-Wave ordering ensures the Karpenter controller is running before its CRDs (`EC2NodeClass`, `NodePool`) are applied.
+Wave ordering ensures the Karpenter controller is running and its admission webhook cert is propagated before the `EC2NodeClass` and `NodePool` CRDs are applied.
 
 ---
 
@@ -120,7 +120,7 @@ aws events list-rules --name-prefix "karpenter" --query "Rules[].Name"
 
 ### NodePool and EC2NodeClass
 
-Applied at sync-wave 3 (after the controller at wave 2). The instance profile name is injected at deploy time from the ArgoCD cluster secret annotation `karpenter-instance-profile-name`.
+Applied at sync-wave 4 (after the controller at wave 3). The instance profile name is injected at deploy time from the ArgoCD cluster secret annotation `karpenter-instance-profile-name`.
 
 | Setting | Value |
 |---------|-------|

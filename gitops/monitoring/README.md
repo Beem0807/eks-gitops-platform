@@ -5,12 +5,12 @@ The `gitops/monitoring/` directory deploys the full observability stack via Argo
 | File | What it deploys |
 |------|----------------|
 | `prometheus/prometheus-crds.yaml` | Prometheus Operator CRDs only (sync-wave 0) - managed separately to allow safe CRD upgrades |
-| `prometheus/prometheus.yaml` | `kube-prometheus-stack` (v82.18.0) - Prometheus, Grafana, Alertmanager, Prometheus Operator, ALB Ingress for Grafana only (sync-wave 4) |
-| `prometheus/prometheus-adapter.yaml` | Prometheus Adapter - exposes Prometheus metrics via the Kubernetes custom metrics API (sync-wave 5) |
-| `thanos/thanos-objstore-secret.yaml` | `thanos-objstore-config` Secret - S3 bucket name and region injected from the ArgoCD cluster secret annotations (sync-wave 3) |
-| `thanos/thanos.yaml` | Thanos - Query, Compactor, StoreGateway (sync-wave 6) |
-| `grafana/grafana-admin-secret.yaml` | ExternalSecret - syncs Grafana admin credentials from AWS Secrets Manager |
-| `grafana/simple-time-service-dashboard.yaml` | Pre-built Grafana dashboard for SimpleTimeService via `charts/raw` |
+| `prometheus/prometheus.yaml` | `kube-prometheus-stack` (v82.18.0) - Prometheus, Grafana, Alertmanager, Prometheus Operator, ALB Ingress for Grafana only (sync-wave 7) |
+| `prometheus/prometheus-adapter.yaml` | Prometheus Adapter - exposes Prometheus metrics via the Kubernetes custom metrics API (sync-wave 9) |
+| `thanos/thanos-objstore-secret.yaml` | `thanos-objstore-config` Secret - S3 bucket name and region injected from the ArgoCD cluster secret annotations (sync-wave 5) |
+| `thanos/thanos.yaml` | Thanos - Query, Compactor, StoreGateway (sync-wave 10) |
+| `grafana/grafana-admin-secret.yaml` | ExternalSecret - syncs Grafana admin credentials from AWS Secrets Manager (sync-wave 5) |
+| `grafana/simple-time-service-dashboard.yaml` | Pre-built Grafana dashboard for SimpleTimeService via `charts/raw` (sync-wave 8) |
 
 ---
 
@@ -102,7 +102,7 @@ Prometheus ──(sidecar)──▶ S3 bucket (thanos-metrics-<account>-<region>
                           Thanos Query ◀── Grafana
 ```
 
-The `thanos-objstore-config` Secret is injected at sync-wave 3 (before Thanos at wave 6) with the S3 bucket name and region read directly from the ArgoCD cluster secret annotations set by `bootstrap.sh` / `upgrade.sh`. No manual secret management is required.
+The `thanos-objstore-config` Secret is injected at sync-wave 5 (before Thanos at wave 10) with the S3 bucket name and region read directly from the ArgoCD cluster secret annotations set by `bootstrap.sh` / `upgrade.sh`. No manual secret management is required.
 
 **Retention policy (Compactor):**
 

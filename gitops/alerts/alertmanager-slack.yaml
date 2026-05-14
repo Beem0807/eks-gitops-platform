@@ -4,7 +4,7 @@ metadata:
   name: alertmanager-slack
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "4"
+    argocd.argoproj.io/sync-wave: "9"
   labels:
     app.kubernetes.io/part-of: eks-gitops-platform
     app.kubernetes.io/managed-by: argocd
@@ -20,8 +20,6 @@ spec:
   template:
     metadata:
       name: 'alertmanager-slack-{{.nameNormalized}}'
-      annotations:
-        argocd.argoproj.io/sync-wave: "4"
       labels:
         app.kubernetes.io/part-of: eks-gitops-platform
         app.kubernetes.io/managed-by: argocd
