@@ -239,6 +239,85 @@ cleanup_leftover_aws_load_balancers() {
   done
 }
 
+cleanup_leftover_aws_security_groups() {
+  if [[ -z "$CLUSTER_NAME" || -z "$AWS_REGION" ]]; then
+    echo "Terraform outputs cluster_name/region not available. Skipping Security Group cleanup."
+    return 0
+  fi
+
+  echo "Deleting leftover Security Groups created by the ingress controller for cluster: $CLUSTER_NAME..."
+
+  # AWS Load Balancer Controller tags SGs it creates with elbv2.k8s.aws/cluster or ingress.k8s.aws/cluster
+  for TAG_KEY in "elbv2.k8s.aws/cluster" "ingress.k8s.aws/cluster"; do
+    SG_IDS="$(aws ec2 describe-security-groups \
+      --region "$AWS_REGION" \
+      --filters "Name=tag:${TAG_KEY},Values=${CLUSTER_NAME}" \
+      --query "SecurityGroups[].GroupId" \
+      --output text 2>/dev/null || true)"
+
+    for sg_id in $SG_IDS; do
+      echo "Deleting ingress-controller Security Group: $sg_id (tag: ${TAG_KEY})"
+      # Revoke all ingress/egress rules first to break cross-SG dependencies
+      aws ec2 revoke-security-group-ingress \
+        --region "$AWS_REGION" \
+        --group-id "$sg_id" \
+        --ip-permissions \
+          "$(aws ec2 describe-security-groups \
+            --region "$AWS_REGION" \
+            --group-ids "$sg_id" \
+            --query "SecurityGroups[0].IpPermissions" \
+            --output json 2>/dev/null)" 2>/dev/null || true
+      aws ec2 revoke-security-group-egress \
+        --region "$AWS_REGION" \
+        --group-id "$sg_id" \
+        --ip-permissions \
+          "$(aws ec2 describe-security-groups \
+            --region "$AWS_REGION" \
+            --group-ids "$sg_id" \
+            --query "SecurityGroups[0].IpPermissionsEgress" \
+            --output json 2>/dev/null)" 2>/dev/null || true
+      aws ec2 delete-security-group \
+        --region "$AWS_REGION" \
+        --group-id "$sg_id" || true
+    done
+  done
+
+  # Also catch any SGs owned by the cluster that look like LBC-managed ones
+  # (named k8s-* which is the LBC naming convention)
+  SG_IDS_OWNED="$(aws ec2 describe-security-groups \
+    --region "$AWS_REGION" \
+    --filters \
+      "Name=tag:kubernetes.io/cluster/${CLUSTER_NAME},Values=owned" \
+      "Name=group-name,Values=k8s-*" \
+    --query "SecurityGroups[].GroupId" \
+    --output text 2>/dev/null || true)"
+
+  for sg_id in $SG_IDS_OWNED; do
+    echo "Deleting cluster-owned LBC Security Group: $sg_id"
+    aws ec2 revoke-security-group-ingress \
+      --region "$AWS_REGION" \
+      --group-id "$sg_id" \
+      --ip-permissions \
+        "$(aws ec2 describe-security-groups \
+          --region "$AWS_REGION" \
+          --group-ids "$sg_id" \
+          --query "SecurityGroups[0].IpPermissions" \
+          --output json 2>/dev/null)" 2>/dev/null || true
+    aws ec2 revoke-security-group-egress \
+      --region "$AWS_REGION" \
+      --group-id "$sg_id" \
+      --ip-permissions \
+        "$(aws ec2 describe-security-groups \
+          --region "$AWS_REGION" \
+          --group-ids "$sg_id" \
+          --query "SecurityGroups[0].IpPermissionsEgress" \
+          --output json 2>/dev/null)" 2>/dev/null || true
+    aws ec2 delete-security-group \
+      --region "$AWS_REGION" \
+      --group-id "$sg_id" || true
+  done
+}
+
 cleanup_ebs_volumes_and_snapshots() {
   if [[ -z "$CLUSTER_NAME" || -z "$AWS_REGION" ]]; then
     echo "Terraform outputs cluster_name/region not available. Skipping EBS cleanup."
@@ -393,6 +472,7 @@ print(next((t['Value'] for t in tags if 'velero' in t['Key'].lower()), ''))
 
 cleanup_kubernetes_resources
 cleanup_leftover_aws_load_balancers
+cleanup_leftover_aws_security_groups
 cleanup_ebs_volumes_and_snapshots
 cleanup_s3_buckets
 
