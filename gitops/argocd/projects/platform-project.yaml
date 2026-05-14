@@ -44,6 +44,9 @@ spec:
       namespace: reloader
     - server: https://kubernetes.default.svc
       namespace: velero
+    # Karpenter creates a RoleBinding here to delete node Lease objects on node termination
+    - server: https://kubernetes.default.svc
+      namespace: kube-node-lease
 
   # Infrastructure tools install CRDs, ClusterRoles, and webhooks — allow all cluster-scoped resources
   clusterResourceWhitelist:

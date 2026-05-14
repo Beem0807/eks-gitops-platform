@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
 TF_DIR="${ROOT_DIR}/terraform"
+PROJECTS_DIR="${ROOT_DIR}/gitops/argocd/projects"
 
 ARGOCD_NS="argocd"
 
@@ -179,6 +180,9 @@ kubectl annotate externalsecret alertmanager-webhook \
   -n monitoring \
   force-sync="${REFRESH_TS}" \
   --overwrite || true
+
+echo "Applying ArgoCD projects..."
+kubectl apply -f "$PROJECTS_DIR/"
 
 echo
 echo "Upgrade completed successfully."

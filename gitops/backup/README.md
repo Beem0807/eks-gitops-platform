@@ -127,3 +127,4 @@ velero backup get
 | PVC not included in backup | Velero backs up PVC objects but skips volume snapshots for PVCs annotated with `backup.velero.io/backup-volumes-excludes`. Remove the annotation or explicitly include the volume: `--include-volumes`. |
 | Restore fails with `already exists` | Add `--existing-resource-policy update` to the restore command to patch existing resources rather than fail. |
 | EBS snapshot not deleted after backup TTL | The `cleanup.sh` script deletes all snapshots tagged `velero.io/backup` as a safety net during cluster teardown. For production, ensure Velero's GC is running: `kubectl get pods -n velero -l app.kubernetes.io/name=velero`. |
+| `velero-upgrade-crds` job stuck in `ImagePullBackOff` | The chart derives the `bitnami/kubectl` tag from the cluster's Kubernetes version, but Bitnami no longer publishes version-specific tags to Docker Hub. Fixed by pinning `kubectl.image.tag: "latest"` in `velero.yaml`. |

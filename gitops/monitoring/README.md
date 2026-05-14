@@ -166,6 +166,16 @@ The dashboard (UID `simple-time-service`, auto-refreshes every 30s) has 12 panel
 
 ---
 
+## Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| `namespace kube-system is not permitted in project 'observability'` on `prometheus-adapter-auth-reader` RoleBinding | Prometheus Adapter creates a `RoleBinding` in `kube-system` so it can read the `extension-apiserver-authentication` ConfigMap — a requirement of the Kubernetes API aggregation layer. The `observability` AppProject must include `kube-system` as a destination (`gitops/argocd/projects/observability-project.yaml`). If the error persists after the project YAML is correct, the AppProject in the cluster has not synced yet — force-sync the ArgoCD self-management app or apply the project YAML directly with `kubectl apply`. |
+| Custom metrics API returns 404 or empty | The adapter's `APIService` registration failed. Check: `kubectl get apiservice v1beta1.custom.metrics.k8s.io` — it should show `True` under AVAILABLE. If not, inspect: `kubectl logs -n monitoring -l app.kubernetes.io/name=prometheus-adapter`. |
+| HPA not scaling on custom metrics | Confirm the metric exists: `kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1/namespaces/*/metrics/<metric-name>`. If missing, the PromQL rule in `prometheus-adapter.yaml` may not match any active time-series. |
+
+---
+
 ## Verifying the ServiceMonitor
 
 Applies only when the service is deployed with `serviceMonitor.enabled=true` and the `latest` image tag.
