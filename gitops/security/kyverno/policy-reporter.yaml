@@ -55,6 +55,13 @@ spec:
             # Kyverno plugin enriches reports with policy metadata
             kyvernoPlugin:
               enabled: true
+              nodeSelector:
+                app: core
+              tolerations:
+                - key: app
+                  operator: Equal
+                  value: core
+                  effect: NoSchedule
 
             ui:
               enabled: true
@@ -88,7 +95,12 @@ spec:
                 annotations:
                   alb.ingress.kubernetes.io/scheme: internet-facing
                   alb.ingress.kubernetes.io/target-type: ip
-                  alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+                  alb.ingress.kubernetes.io/backend-protocol: HTTP
+                  alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+                  alb.ingress.kubernetes.io/ssl-redirect: "443"
+                tls:
+                  - hosts:
+                      - "policy-reporter.platform.{{ .values.domainName }}"
                 hosts:
                   - host: "policy-reporter.platform.{{ .values.domainName }}"
                     paths:
