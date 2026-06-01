@@ -37,6 +37,408 @@ echo "Reading Terraform outputs..."
 
 CLUSTER_NAME="$(terraform output -raw cluster_name 2>/dev/null || true)"
 AWS_REGION="$(terraform output -raw region 2>/dev/null || true)"
+VPC_ID="$(terraform output -raw vpc_id 2>/dev/null || true)"
+
+# Shared helper: terminate all EC2 instances tagged by Karpenter for this cluster.
+# Called both as a fallback inside cleanup_kubernetes_resources and from
+# cleanup_karpenter_ec2_instances for the direct AWS-level pass.
+_force_terminate_karpenter_instances() {
+  local instance_ids=""
+
+  for filter_tag in "karpenter.sh/managed-by" "karpenter.k8s.aws/cluster"; do
+    local ids
+    ids="$(aws ec2 describe-instances \
+      --region "$AWS_REGION" \
+      --filters \
+        "Name=tag:${filter_tag},Values=${CLUSTER_NAME}" \
+        "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+      --query "Reservations[].Instances[].InstanceId" \
+      --output text 2>/dev/null || true)"
+    instance_ids="$(printf '%s\n%s' "$instance_ids" "$ids")"
+  done
+
+  # Also catch instances tagged with the nodepool label (belt-and-suspenders)
+  local nodepool_ids
+  nodepool_ids="$(aws ec2 describe-instances \
+    --region "$AWS_REGION" \
+    --filters \
+      "Name=tag-key,Values=karpenter.sh/nodepool" \
+      "Name=tag:kubernetes.io/cluster/${CLUSTER_NAME},Values=owned" \
+      "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+    --query "Reservations[].Instances[].InstanceId" \
+    --output text 2>/dev/null || true)"
+  instance_ids="$(printf '%s\n%s' "$instance_ids" "$nodepool_ids")"
+
+  # Deduplicate and strip blanks
+  local unique_ids
+  unique_ids="$(echo "$instance_ids" | tr ' ' '\n' | sort -u | grep -v '^$' | xargs)"
+
+  if [[ -z "$unique_ids" ]]; then
+    echo "No Karpenter EC2 instances found to terminate."
+    return 0
+  fi
+
+  echo "Terminating Karpenter EC2 instances: $unique_ids"
+  # shellcheck disable=SC2086
+  aws ec2 terminate-instances \
+    --region "$AWS_REGION" \
+    --instance-ids $unique_ids || true
+
+  echo "Waiting for Karpenter EC2 instances to reach terminated state..."
+  for i in $(seq 1 24); do
+    local remaining
+    # shellcheck disable=SC2086
+    remaining="$(aws ec2 describe-instances \
+      --region "$AWS_REGION" \
+      --instance-ids $unique_ids \
+      --filters "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+      --query "Reservations[].Instances[].InstanceId" \
+      --output text 2>/dev/null | wc -w | tr -d ' ')"
+
+    if [[ "$remaining" == "0" ]]; then
+      echo "All Karpenter EC2 instances terminated."
+      return 0
+    fi
+
+    echo "  $remaining instance(s) still terminating... ($i/24)"
+    sleep 15
+  done
+
+  echo "WARNING: Some Karpenter EC2 instances may not have terminated. Continuing..."
+}
+
+# AWS-level Karpenter EC2 cleanup pass (runs after Kubernetes cleanup in case
+# any instances escaped controller-driven termination).
+cleanup_karpenter_ec2_instances() {
+  if [[ -z "$CLUSTER_NAME" || -z "$AWS_REGION" ]]; then
+    echo "Terraform outputs cluster_name/region not available. Skipping Karpenter EC2 cleanup."
+    return 0
+  fi
+
+  echo "Running direct AWS cleanup of any remaining Karpenter EC2 instances..."
+  _force_terminate_karpenter_instances
+}
+
+cleanup_leftover_vpc() {
+  if [[ -z "$AWS_REGION" ]]; then
+    echo "AWS_REGION not available. Skipping VPC cleanup."
+    return 0
+  fi
+
+  # Resolve VPC ID: prefer Terraform output, fall back to cluster tag.
+  local vpc_id="$VPC_ID"
+  if [[ -z "$vpc_id" && -n "$CLUSTER_NAME" ]]; then
+    vpc_id="$(aws ec2 describe-vpcs \
+      --region "$AWS_REGION" \
+      --filters "Name=tag:kubernetes.io/cluster/${CLUSTER_NAME},Values=owned,shared" \
+      --query "Vpcs[0].VpcId" \
+      --output text 2>/dev/null || true)"
+    [[ "$vpc_id" == "None" ]] && vpc_id=""
+  fi
+
+  if [[ -z "$vpc_id" ]]; then
+    echo "VPC ID not found. Skipping VPC cleanup."
+    return 0
+  fi
+
+  echo "Cleaning up leftover VPC: $vpc_id"
+
+  # 1. Terminate every non-terminated EC2 instance still in the VPC.
+  #    This is the primary reason terraform destroy fails to delete the VPC.
+  echo "  Terminating remaining EC2 instances in VPC $vpc_id..."
+  local instance_ids
+  instance_ids="$(aws ec2 describe-instances \
+    --region "$AWS_REGION" \
+    --filters \
+      "Name=vpc-id,Values=${vpc_id}" \
+      "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+    --query "Reservations[].Instances[].InstanceId" \
+    --output text 2>/dev/null || true)"
+
+  if [[ -n "$instance_ids" ]]; then
+    echo "  Terminating: $instance_ids"
+    # shellcheck disable=SC2086
+    aws ec2 terminate-instances \
+      --region "$AWS_REGION" \
+      --instance-ids $instance_ids || true
+
+    echo "  Waiting for instances to terminate..."
+    # shellcheck disable=SC2086
+    aws ec2 wait instance-terminated \
+      --region "$AWS_REGION" \
+      --instance-ids $instance_ids 2>/dev/null || true
+  fi
+
+  # 2. Delete NAT Gateways (must be deleted before subnets; they take time).
+  echo "  Deleting NAT Gateways in VPC $vpc_id..."
+  local nat_ids
+  nat_ids="$(aws ec2 describe-nat-gateways \
+    --region "$AWS_REGION" \
+    --filter "Name=vpc-id,Values=${vpc_id}" \
+    --query "NatGateways[?State!='deleted'].NatGatewayId" \
+    --output text 2>/dev/null || true)"
+
+  for nat_id in $nat_ids; do
+    echo "  Deleting NAT Gateway: $nat_id"
+    aws ec2 delete-nat-gateway \
+      --region "$AWS_REGION" \
+      --nat-gateway-id "$nat_id" || true
+  done
+
+  if [[ -n "$nat_ids" ]]; then
+    echo "  Waiting for NAT Gateways to delete..."
+    for i in $(seq 1 20); do
+      local pending
+      # shellcheck disable=SC2086
+      pending="$(aws ec2 describe-nat-gateways \
+        --region "$AWS_REGION" \
+        --nat-gateway-ids $nat_ids \
+        --query "NatGateways[?State!='deleted'].NatGatewayId" \
+        --output text 2>/dev/null | wc -w | tr -d ' ')"
+      [[ "$pending" == "0" ]] && break
+      echo "  $pending NAT Gateway(s) still deleting... ($i/20)"
+      sleep 15
+    done
+  fi
+
+  # 3. Detach and delete the Internet Gateway.
+  echo "  Detaching Internet Gateway from VPC $vpc_id..."
+  local igw_id
+  igw_id="$(aws ec2 describe-internet-gateways \
+    --region "$AWS_REGION" \
+    --filters "Name=attachment.vpc-id,Values=${vpc_id}" \
+    --query "InternetGateways[0].InternetGatewayId" \
+    --output text 2>/dev/null || true)"
+  [[ "$igw_id" == "None" ]] && igw_id=""
+
+  if [[ -n "$igw_id" ]]; then
+    aws ec2 detach-internet-gateway \
+      --region "$AWS_REGION" \
+      --internet-gateway-id "$igw_id" \
+      --vpc-id "$vpc_id" || true
+    aws ec2 delete-internet-gateway \
+      --region "$AWS_REGION" \
+      --internet-gateway-id "$igw_id" || true
+    echo "  Deleted Internet Gateway: $igw_id"
+  fi
+
+  # 4. Delete VPC Endpoints.
+  echo "  Deleting VPC Endpoints in VPC $vpc_id..."
+  local endpoint_ids
+  endpoint_ids="$(aws ec2 describe-vpc-endpoints \
+    --region "$AWS_REGION" \
+    --filters "Name=vpc-id,Values=${vpc_id}" \
+    --query "VpcEndpoints[?State!='deleted'].VpcEndpointId" \
+    --output text 2>/dev/null || true)"
+
+  if [[ -n "$endpoint_ids" ]]; then
+    # shellcheck disable=SC2086
+    aws ec2 delete-vpc-endpoints \
+      --region "$AWS_REGION" \
+      --vpc-endpoint-ids $endpoint_ids || true
+    echo "  Deleted endpoints: $endpoint_ids"
+  fi
+
+  # 5. Release leftover Elastic Network Interfaces.
+  echo "  Deleting leftover ENIs in VPC $vpc_id..."
+  local eni_ids
+  eni_ids="$(aws ec2 describe-network-interfaces \
+    --region "$AWS_REGION" \
+    --filters "Name=vpc-id,Values=${vpc_id}" \
+    --query "NetworkInterfaces[].NetworkInterfaceId" \
+    --output text 2>/dev/null || true)"
+
+  for eni_id in $eni_ids; do
+    local attachment_id
+    attachment_id="$(aws ec2 describe-network-interfaces \
+      --region "$AWS_REGION" \
+      --network-interface-ids "$eni_id" \
+      --query "NetworkInterfaces[0].Attachment.AttachmentId" \
+      --output text 2>/dev/null || true)"
+    [[ "$attachment_id" != "None" && -n "$attachment_id" ]] && \
+      aws ec2 detach-network-interface \
+        --region "$AWS_REGION" \
+        --attachment-id "$attachment_id" \
+        --force || true
+    aws ec2 delete-network-interface \
+      --region "$AWS_REGION" \
+      --network-interface-id "$eni_id" || true
+  done
+
+  # 6. Delete all non-main route tables.
+  echo "  Deleting route tables in VPC $vpc_id..."
+  local rt_ids
+  rt_ids="$(aws ec2 describe-route-tables \
+    --region "$AWS_REGION" \
+    --filters "Name=vpc-id,Values=${vpc_id}" \
+    --query "RouteTables[?Associations[?Main!=\`true\`] || !Associations].RouteTableId" \
+    --output text 2>/dev/null || true)"
+
+  for rt_id in $rt_ids; do
+    aws ec2 delete-route-table \
+      --region "$AWS_REGION" \
+      --route-table-id "$rt_id" 2>/dev/null || true
+  done
+
+  # 7. Delete all subnets.
+  echo "  Deleting subnets in VPC $vpc_id..."
+  local subnet_ids
+  subnet_ids="$(aws ec2 describe-subnets \
+    --region "$AWS_REGION" \
+    --filters "Name=vpc-id,Values=${vpc_id}" \
+    --query "Subnets[].SubnetId" \
+    --output text 2>/dev/null || true)"
+
+  for subnet_id in $subnet_ids; do
+    aws ec2 delete-subnet \
+      --region "$AWS_REGION" \
+      --subnet-id "$subnet_id" || true
+  done
+
+  # 8. Delete non-default security groups.
+  echo "  Deleting security groups in VPC $vpc_id..."
+  local sg_ids
+  sg_ids="$(aws ec2 describe-security-groups \
+    --region "$AWS_REGION" \
+    --filters "Name=vpc-id,Values=${vpc_id}" \
+    --query "SecurityGroups[?GroupName!='default'].GroupId" \
+    --output text 2>/dev/null || true)"
+
+  for sg_id in $sg_ids; do
+    aws ec2 delete-security-group \
+      --region "$AWS_REGION" \
+      --group-id "$sg_id" 2>/dev/null || true
+  done
+
+  # 9. Delete the VPC itself.
+  echo "  Deleting VPC: $vpc_id"
+  if aws ec2 delete-vpc \
+    --region "$AWS_REGION" \
+    --vpc-id "$vpc_id" 2>/dev/null; then
+    echo "  VPC $vpc_id deleted."
+  else
+    echo "  WARNING: Could not delete VPC $vpc_id. There may be remaining dependencies."
+    echo "  Run: aws ec2 describe-vpc-attribute --vpc-id $vpc_id --region $AWS_REGION"
+  fi
+}
+
+verify_cleanup() {
+  if [[ -z "$CLUSTER_NAME" || -z "$AWS_REGION" ]]; then
+    echo "Skipping verification (cluster_name/region not available)."
+    return 0
+  fi
+
+  echo ""
+  echo "=== Post-destroy verification ==="
+  local issues=0
+
+  echo "Checking for remaining Karpenter EC2 instances..."
+  local karpenter_instances=""
+  for filter_tag in "karpenter.sh/managed-by" "karpenter.k8s.aws/cluster"; do
+    local ids
+    ids="$(aws ec2 describe-instances \
+      --region "$AWS_REGION" \
+      --filters \
+        "Name=tag:${filter_tag},Values=${CLUSTER_NAME}" \
+        "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+      --query "Reservations[].Instances[].InstanceId" \
+      --output text 2>/dev/null || true)"
+    karpenter_instances="$(printf '%s %s' "$karpenter_instances" "$ids")"
+  done
+  karpenter_instances="$(echo "$karpenter_instances" | tr ' ' '\n' | sort -u | grep -v '^$' | xargs)"
+  if [[ -n "$karpenter_instances" ]]; then
+    echo "  WARNING: Karpenter EC2 instances still present: $karpenter_instances"
+    issues=$((issues + 1))
+  else
+    echo "  OK: No Karpenter EC2 instances."
+  fi
+
+  echo "Checking for remaining ALB/NLB load balancers..."
+  local lb_arns
+  lb_arns="$(aws elbv2 describe-load-balancers \
+    --region "$AWS_REGION" \
+    --query "LoadBalancers[?contains(LoadBalancerName, '${CLUSTER_NAME}')].LoadBalancerArn" \
+    --output text 2>/dev/null || true)"
+  if [[ -n "$lb_arns" ]]; then
+    echo "  WARNING: Load balancer(s) still present: $lb_arns"
+    issues=$((issues + 1))
+  else
+    echo "  OK: No cluster load balancers found."
+  fi
+
+  echo "Checking for remaining EBS volumes..."
+  local ebs_ids
+  ebs_ids="$(aws ec2 describe-volumes \
+    --region "$AWS_REGION" \
+    --filters "Name=tag:kubernetes.io/cluster/${CLUSTER_NAME},Values=owned" \
+    --query "Volumes[].VolumeId" \
+    --output text 2>/dev/null || true)"
+  if [[ -n "$ebs_ids" ]]; then
+    echo "  WARNING: EBS volumes still present: $ebs_ids"
+    issues=$((issues + 1))
+  else
+    echo "  OK: No cluster EBS volumes found."
+  fi
+
+  echo "Checking for remaining cluster security groups..."
+  local sg_ids
+  sg_ids="$(aws ec2 describe-security-groups \
+    --region "$AWS_REGION" \
+    --filters "Name=tag:kubernetes.io/cluster/${CLUSTER_NAME},Values=owned" \
+    --query "SecurityGroups[].GroupId" \
+    --output text 2>/dev/null || true)"
+  if [[ -n "$sg_ids" ]]; then
+    echo "  WARNING: Security group(s) still present: $sg_ids"
+    issues=$((issues + 1))
+  else
+    echo "  OK: No cluster security groups found."
+  fi
+
+  echo "Checking for remaining VPC..."
+  local check_vpc="${VPC_ID}"
+  if [[ -z "$check_vpc" && -n "$CLUSTER_NAME" ]]; then
+    check_vpc="$(aws ec2 describe-vpcs \
+      --region "$AWS_REGION" \
+      --filters "Name=tag:kubernetes.io/cluster/${CLUSTER_NAME},Values=owned,shared" \
+      --query "Vpcs[0].VpcId" \
+      --output text 2>/dev/null || true)"
+    [[ "$check_vpc" == "None" ]] && check_vpc=""
+  fi
+  if [[ -n "$check_vpc" ]]; then
+    echo "  WARNING: VPC $check_vpc still exists."
+    issues=$((issues + 1))
+  else
+    echo "  OK: VPC deleted."
+  fi
+
+  echo "Checking for remaining Terraform-managed resources..."
+  local tf_resources
+  tf_resources="$(terraform show -json 2>/dev/null \
+    | python3 -c "
+import sys, json
+try:
+    state = json.load(sys.stdin)
+    resources = state.get('values', {}).get('root_module', {}).get('resources', [])
+    print(len(resources))
+except Exception:
+    print('unknown')
+" 2>/dev/null || echo "unknown")"
+  if [[ "$tf_resources" == "0" ]]; then
+    echo "  OK: Terraform state is empty."
+  elif [[ "$tf_resources" == "unknown" ]]; then
+    echo "  INFO: Could not parse Terraform state. Verify manually with: terraform show"
+  else
+    echo "  WARNING: $tf_resources Terraform resource(s) still in state. Run 'terraform show' to review."
+    issues=$((issues + 1))
+  fi
+
+  echo ""
+  if [[ "$issues" -eq 0 ]]; then
+    echo "Verification passed: all resources cleaned up successfully."
+  else
+    echo "Verification found $issues issue(s). Review the warnings above before considering cleanup complete."
+  fi
+}
 
 cleanup_kubernetes_resources() {
   if [[ -z "$CLUSTER_NAME" || -z "$AWS_REGION" ]]; then
@@ -120,6 +522,7 @@ cleanup_kubernetes_resources() {
     --wait=false || true
 
   echo "Waiting for Karpenter-managed nodes to terminate..."
+  KARPENTER_NODE_COUNT="0"
   for i in $(seq 1 24); do
     KARPENTER_NODE_COUNT="$(kubectl get nodes -l karpenter.sh/nodepool \
       --no-headers 2>/dev/null | wc -l | tr -d ' ')"
@@ -132,6 +535,11 @@ cleanup_kubernetes_resources() {
     echo "Karpenter-managed nodes still present: $KARPENTER_NODE_COUNT. Waiting..."
     sleep 15
   done
+
+  if [[ "$KARPENTER_NODE_COUNT" != "0" ]]; then
+    echo "WARNING: $KARPENTER_NODE_COUNT Karpenter node(s) did not drain in time. Falling back to AWS EC2 force-termination..."
+    _force_terminate_karpenter_instances
+  fi
 
   echo "Current Karpenter-managed nodes, if any:"
   kubectl get nodes -l karpenter.sh/nodepool || true
@@ -476,6 +884,7 @@ print(next((t['Value'] for t in tags if 'velero' in t['Key'].lower()), ''))
 }
 
 cleanup_kubernetes_resources
+cleanup_karpenter_ec2_instances
 cleanup_leftover_aws_load_balancers
 cleanup_leftover_aws_security_groups
 cleanup_ebs_volumes_and_snapshots
@@ -487,4 +896,8 @@ terraform destroy \
   -auto-approve \
   -input=false
 
-echo "Cleanup completed successfully."
+cleanup_leftover_vpc
+
+verify_cleanup
+
+echo "Cleanup completed."
