@@ -39,7 +39,7 @@ spec:
           values: |
             crds:
               enabled: false
-            
+
             grafana:
               enabled: true
               annotations:
@@ -49,11 +49,11 @@ spec:
                 existingSecret: grafana-admin
                 userKey: admin-user
                 passwordKey: admin-password
-              
+
               sidecar:
                 datasources:
                   defaultDatasourceEnabled: false
-              
+
               additionalDataSources:
                 - name: Thanos
                   type: prometheus
@@ -63,7 +63,7 @@ spec:
                   isDefault: true
                   jsonData:
                     timeInterval: 30s
-              
+
               tolerations:
                 - key: "app"
                   operator: "Equal"

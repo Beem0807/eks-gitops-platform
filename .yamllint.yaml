@@ -1,0 +1,16 @@
+extends: default
+
+ignore: |
+  charts/*/templates/
+  charts/*/templates/**
+
+rules:
+  document-start: disable
+  line-length:
+    max: 150
+    level: warning
+  truthy:
+    allowed-values: ['true', 'false']
+    check-keys: false
+  comments:
+    min-spaces-from-content: 1

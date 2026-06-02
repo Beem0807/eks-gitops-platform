@@ -205,7 +205,9 @@ bash terraform/scripts/upgrade.sh
 │   ├── README.md                               # CI workflows - triggers, steps, secrets, branch protection
 │   └── workflows/
 │       ├── app-image.yaml                      # CI - build, scan, and push Docker image to Docker Hub
-│       └── terraform-ci.yaml                   # CI - format, validate, lint, and security scan Terraform
+│       ├── terraform-ci.yaml                   # CI - format, validate, lint, and security scan Terraform
+│       └── gitops-ci.yaml                      # CI - helm lint, kubeconform, and yamllint for GitOps manifests
+├── .yamllint.yaml                              # yamllint config - rules for gitops-ci YAML linting
 ├── compose.yaml                                # Docker Compose for local development
 ├── app/
 │   ├── Dockerfile

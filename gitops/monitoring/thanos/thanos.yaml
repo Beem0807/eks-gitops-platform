@@ -39,7 +39,7 @@ spec:
             global:
               security:
                 allowInsecureImages: true
-            
+
             image:
               registry: quay.io
               repository: thanos/thanos
