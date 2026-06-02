@@ -219,5 +219,11 @@ kubectl describe hpa simple-time-service -n simple-time-service
 | Symptom | Fix |
 |---------|-----|
 | `namespace kube-node-lease is not permitted in project 'platform'` on Karpenter sync | Karpenter creates a `RoleBinding` in the `kube-node-lease` namespace so it can delete node `Lease` objects when it terminates nodes. The `platform` AppProject must include `kube-node-lease` as a destination (`gitops/argocd/projects/platform-project.yaml`). |
-| Karpenter nodes not provisioning | Check Karpenter controller logs: `kubectl logs -n karpenter -l app.kubernetes.io/name=karpenter`. Common causes: Pod Identity not configured, interruption queue name mismatch, or missing `karpenter.sh/discovery` tag on subnets/security groups. |
-| Nodes provisioned but pods not scheduled | Confirm the pod has both the matching `nodeSelector: {app: workload}` and the `app=workload:NoSchedule` toleration. Karpenter only provisions for pods it can actually schedule. |
+
+For operational incidents see the runbooks:
+
+| Symptom | Runbook |
+|---------|---------|
+| Karpenter not provisioning nodes - Pod Identity, NodePool limits, subnet/SG tags | [karpenter-node-not-provisioning.md](../../docs/runbooks/karpenter-node-not-provisioning.md) |
+| Nodes provisioned but pods not scheduled (taint/toleration mismatch) | [karpenter-node-not-provisioning.md](../../docs/runbooks/karpenter-node-not-provisioning.md) |
+| HPA not scaling / metrics-server unavailable | [hpa-not-scaling.md](../../docs/runbooks/hpa-not-scaling.md) |

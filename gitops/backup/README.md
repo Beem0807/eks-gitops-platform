@@ -122,9 +122,12 @@ velero backup get
 
 | Symptom | Fix |
 |---------|-----|
-| `BackupStorageLocation` phase `Unavailable` | Check IRSA: `kubectl get sa velero -n velero -o yaml` - confirm the `eks.amazonaws.com/role-arn` annotation. Check controller logs: `kubectl logs -n velero -l app.kubernetes.io/name=velero`. |
-| Backup stuck in `InProgress` | Check logs: `velero backup logs <backup-name>`. Common cause: IRSA permissions missing for EC2 snapshot actions. |
 | PVC not included in backup | Velero backs up PVC objects but skips volume snapshots for PVCs annotated with `backup.velero.io/backup-volumes-excludes`. Remove the annotation or explicitly include the volume: `--include-volumes`. |
-| Restore fails with `already exists` | Add `--existing-resource-policy update` to the restore command to patch existing resources rather than fail. |
-| EBS snapshot not deleted after backup TTL | The `cleanup.sh` script deletes all snapshots tagged `velero.io/backup` as a safety net during cluster teardown. For production, ensure Velero's GC is running: `kubectl get pods -n velero -l app.kubernetes.io/name=velero`. |
-| `velero-upgrade-crds` job failing (`ImagePullBackOff`, `libreadline.so.8`, `/bin/sh not found`, `/tmp/sh not found`) | The upgrade-crds hook job is tightly coupled to the bitnami/kubectl image, which puts its entrypoint at `/tmp/sh`. Bitnami no longer publishes version-specific tags to Docker Hub, `latest` has broken shared library dependencies, and no other standard image provides `/tmp/sh`. Fixed by setting `upgradeCRDs: false` in `velero.yaml`. CRDs are applied by Helm on install/upgrade - the hook is redundant unless you are manually applying CRD-only upgrades outside of Helm. |
+| EBS snapshot not deleted after backup TTL | `cleanup.sh` deletes all snapshots tagged `velero.io/backup` during cluster teardown. For production, ensure Velero's GC controller is running: `kubectl get pods -n velero -l app.kubernetes.io/name=velero`. |
+| `velero-upgrade-crds` job failing | Fixed by `upgradeCRDs: false` in `velero.yaml`. CRDs are applied by Helm on install/upgrade - the hook is redundant and coupled to a bitnami image that no longer publishes stable tags. |
+
+For operational incidents see the runbooks:
+
+| Symptom | Runbook |
+|---------|---------|
+| `BackupStorageLocation` Unavailable / backup stuck `InProgress` / restore failing | [velero-restore.md](../../docs/runbooks/velero-restore.md) |

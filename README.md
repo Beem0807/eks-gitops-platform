@@ -53,6 +53,8 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 | [gitops/security/README.md](gitops/security/README.md) | Kyverno policies, Policy Reporter UI, inspecting policy reports |
 | **Design** | |
 | [docs/design-decisions.md](docs/design-decisions.md) | Why each architectural choice was made - tool selection, configuration defaults, and demo trade-offs |
+| **Runbooks** | |
+| [docs/runbooks/README.md](docs/runbooks/README.md) | 13 operational runbooks - compute, networking, GitOps, observability, secrets, security, backup |
 
 ---
 
@@ -319,6 +321,8 @@ bash terraform/scripts/upgrade.sh
 │   ├── load_test.py                            # Python load generator (no dependencies)
 │   └── k6-staged.js                            # k6 staged ramping-arrival-rate scenario
 ├── docs/
+│   ├── design-decisions.md                     # Architectural choices and trade-offs
+│   ├── runbooks/                               # 13 operational runbooks (incidents, DR, debugging)
 │   └── images/                                 # Screenshots referenced in sub-READMEs
 └── terraform/
     ├── main.tf                                 # Root module - wires VPC and EKS modules
@@ -363,9 +367,10 @@ bash terraform/scripts/upgrade.sh
 
 ---
 
-## Design decisions
+## Platform Engineering Docs
 
-Architectural choices, tool selections, configuration defaults, and demo trade-offs are documented in [docs/design-decisions.md](docs/design-decisions.md).
+- [Design Decisions](docs/design-decisions.md) - architectural choices, tool selections, configuration defaults, and demo trade-offs
+- [Operational Runbooks](docs/runbooks/README.md) - 13 runbooks covering incidents, DR, and debugging across all platform components
 
 ---
 
@@ -397,19 +402,25 @@ The cleanup script runs six steps in order:
 
 ## Troubleshooting
 
+**Setup issues**
+
 | Symptom | Fix |
 |---------|-----|
 | `kubectl get nodes` - `Unauthorized` | Re-run `aws eks update-kubeconfig` as the same IAM identity that ran `terraform apply`. |
 | ArgoCD apps missing after bootstrap | `argocd app sync root-app` or click **Sync** on the root-app tile in the UI. |
 | Service unreachable from localhost | Service type is `ClusterIP` - use `kubectl port-forward svc/simple-time-service -n simple-time-service 8080:80`. |
-| ServiceMonitor missing from Prometheus targets | Confirm `serviceMonitor.enabled: true` in Helm values and `serviceMonitorSelectorNilUsesHelmValues: false` in `prometheusSpec`. Check with `kubectl get servicemonitor -n simple-time-service`. |
-| `kubectl top pods` - `Metrics API not available` | `metrics-server` is not running. Check `kubectl get pods -n kube-system -l app.kubernetes.io/name=metrics-server`. |
-| HPA shows `<unknown>/70%` | `metrics-server` unavailable or pods have no CPU requests set. Verify `kubectl top pods -n simple-time-service` works first. |
-| HPA not scaling under load | Confirm `hpa.enabled: true` is set in the ApplicationSet override and ArgoCD has synced. Run `kubectl describe hpa simple-time-service -n simple-time-service` for events. |
-| Slack alerts not arriving | Check ExternalSecret sync: `kubectl get externalsecret -n monitoring`. Check config: `kubectl describe alertmanagerconfig slack -n monitoring`. Confirm the `notify: slack` label is on the alert. |
-| `alertmanager-slack` app degraded in ArgoCD | The Alertmanager webhook ExternalSecret failed to sync. Run `kubectl get externalsecret -n monitoring` and verify the AWS Secrets Manager secret `alertmanager-webhook` exists. |
-| Thanos pods in `CrashLoopBackOff` | Check that the `thanos-objstore-config` Secret exists in the `monitoring` namespace: `kubectl get secret thanos-objstore-config -n monitoring`. The `thanos-objstore-secret` ArgoCD app must sync before `thanos`. |
-| Prometheus Adapter not serving custom metrics | Run `kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1` to verify the API is registered. If empty, check `kubectl logs -n monitoring -l app.kubernetes.io/name=prometheus-adapter`. |
-| Policy Reporter UI not loading | Check pod is running: `kubectl get pods -n security -l app.kubernetes.io/name=policy-reporter`. Access via port-forward: `kubectl port-forward svc/policy-reporter-ui -n security 8080:8080`. |
-| `kubectl get clusterpolicy` returns nothing | The `kyverno-policies` ArgoCD app may not have synced. Check: `argocd app get kyverno-policies-in-cluster`. Kyverno CRDs must be registered first - confirm: `kubectl get crd | grep kyverno`. |
-| Kyverno pods crash-looping | Check resource pressure on core nodes: `kubectl top nodes -l app=core`. Kyverno admission controller requires ~128 Mi memory. Check events: `kubectl describe pods -n security -l app.kubernetes.io/name=kyverno`. |
+
+**Operational issues** - see [`docs/runbooks/`](docs/runbooks/) for full diagnosis and fix steps:
+
+| Symptom | Runbook |
+|---------|---------|
+| `kubectl top pods` - `Metrics API not available` / HPA shows `<unknown>` | [hpa-not-scaling.md](docs/runbooks/hpa-not-scaling.md) |
+| HPA not scaling under load | [hpa-not-scaling.md](docs/runbooks/hpa-not-scaling.md) |
+| ServiceMonitor missing from Prometheus targets | [prometheus-target-down.md](docs/runbooks/prometheus-target-down.md) |
+| Prometheus Adapter not serving custom metrics | [prometheus-target-down.md](docs/runbooks/prometheus-target-down.md) |
+| Grafana shows "No data" across all dashboards | [thanos-no-metrics.md](docs/runbooks/thanos-no-metrics.md) |
+| Thanos pods in `CrashLoopBackOff` | [thanos-no-metrics.md](docs/runbooks/thanos-no-metrics.md) |
+| Slack alerts not arriving | [alertmanager-not-firing.md](docs/runbooks/alertmanager-not-firing.md) |
+| `alertmanager-slack` app degraded in ArgoCD | [alertmanager-not-firing.md](docs/runbooks/alertmanager-not-firing.md) · [external-secrets-not-syncing.md](docs/runbooks/external-secrets-not-syncing.md) |
+| Kyverno pods crash-looping / `kubectl get clusterpolicy` returns nothing | [kyverno-policy-violation.md](docs/runbooks/kyverno-policy-violation.md) |
+| Policy Reporter UI not loading | [kyverno-policy-violation.md](docs/runbooks/kyverno-policy-violation.md) |

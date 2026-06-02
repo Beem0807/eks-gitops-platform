@@ -139,7 +139,12 @@ Expected pods:
 | Symptom | Fix |
 |---------|-----|
 | Kyverno pods pending | Check taint toleration: `kubectl describe pod -n security <pod>`. All components require `app=core:NoSchedule` toleration. |
-| `kubectl get clusterpolicy` returns nothing | The `kyverno-policies` app has not synced. Check: `argocd app get kyverno-policies-in-cluster`. Kyverno CRDs must be registered first - confirm: `kubectl get crd \| grep kyverno`. |
-| ClusterPolicy shows `OutOfSync` in ArgoCD | Kyverno webhooks inject `skipBackgroundRequests` into rule specs. The `ignoreDifferences` block handles this. If still out of sync, check: `argocd app diff kyverno-policies-in-cluster`. |
-| Policy Reporter UI blank / no data | Policies generate reports only after pod admission activity. Create or restart a pod in any namespace to trigger report generation: `kubectl rollout restart deploy/<name> -n <namespace>`. |
+| ClusterPolicy shows `OutOfSync` in ArgoCD | Kyverno webhooks inject `skipBackgroundRequests` into rule specs. The `ignoreDifferences` block handles this - if still drifting, run `argocd app diff kyverno-policies-in-cluster`. |
+| Policy Reporter UI blank / no data | Policies generate reports only after pod admission activity. Restart any pod to trigger report generation: `kubectl rollout restart deploy/<name> -n <namespace>`. |
 | `policy-reporter-kyverno-plugin` pending | Check node scheduling: `kubectl describe pod -n security -l app.kubernetes.io/name=policy-reporter-kyverno-plugin`. Toleration for `app=core` must be present. |
+
+For operational incidents see the runbooks:
+
+| Symptom | Runbook |
+|---------|---------|
+| `kubectl get clusterpolicy` returns nothing / Kyverno pods crash-looping / deployment blocked by admission webhook | [kyverno-policy-violation.md](../../docs/runbooks/kyverno-policy-violation.md) |

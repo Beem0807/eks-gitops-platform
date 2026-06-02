@@ -186,8 +186,12 @@ kubectl logs -n reloader -l app=reloader --tail=50
 
 | Symptom | Fix |
 |---------|-----|
-| `ClusterSecretStore` status `Invalid` | Check IRSA trust: `kubectl describe clustersecretstore aws-secrets-manager`. Confirm the ESO service account has the correct `eks.amazonaws.com/role-arn` annotation: `kubectl get sa external-secrets -n external-secrets -o yaml`. |
-| ExternalSecret stuck in `SecretSyncedError` | Run `kubectl describe externalsecret <name> -n <namespace>` for the exact error. Common causes: Secrets Manager secret does not exist, missing `ExternalSecret=true` tag, or wrong property key name. |
-| ExternalSecret `Ready` but pod not updated | Reloader is responsible for the rollout. Confirm the Deployment has the `reloader.stakater.com/auto: "true"` annotation and Reloader is running. |
-| Secret not refreshing after Secrets Manager update | The refresh interval is 1h. Force an immediate sync with the `force-sync` annotation (see above), or use `upgrade.sh`. |
+| ExternalSecret `Ready` but pod not updated | Reloader is responsible for the rollout. Confirm the Deployment has the `reloader.stakater.com/auto: "true"` annotation and Reloader is running: `kubectl get pods -n reloader`. |
 | `argocd-secret` patch fails | The `Merge` creation policy requires the target secret to already exist. Ensure ArgoCD has fully initialised before the `argocd-admin-password` ExternalSecret syncs (sync-wave 5 ensures this). |
+
+For operational incidents see the runbooks:
+
+| Symptom | Runbook |
+|---------|---------|
+| `ClusterSecretStore` status `Invalid` / ExternalSecret stuck in `SecretSyncedError` | [external-secrets-not-syncing.md](../../docs/runbooks/external-secrets-not-syncing.md) |
+| Secret not refreshing after Secrets Manager rotation | [external-secrets-not-syncing.md](../../docs/runbooks/external-secrets-not-syncing.md) |

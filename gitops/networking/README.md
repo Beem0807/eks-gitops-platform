@@ -136,9 +136,12 @@ aws route53 list-resource-record-sets \
 
 | Symptom | Fix |
 |---------|-----|
-| Ingress stuck in `Pending` / no ALB created | Check LBC logs: `kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller`. Confirm the IRSA role ARN is correct and the node has the right OIDC trust. |
-| ALB created but returns 503 | Target group health checks failing. Confirm pods are `Running` and the health check path (`/health`) returns 200. |
-| DNS not resolving | Check ExternalDNS logs for Route53 API errors. Confirm `domain-name` annotation on the ArgoCD cluster secret matches the actual hosted zone. |
 | DNS resolves but certificate error | The ACM certificate must cover the hostname (wildcard `*.platform.<domain>` recommended). Check ALB listener certificate in the AWS console. |
-| `kubectl get ingress` shows no `ADDRESS` | ALB provisioning in progress - takes 1–3 minutes. Check LBC logs for errors. |
-| Webhook error: `x509: certificate signed by unknown authority` | LBC webhook cert not yet propagated. This is prevented by the wave gap (LBC at wave 2, Ingresses at wave 6+), but can still occur if ArgoCD is force-synced out of order. Wait for LBC pods to be fully ready before re-syncing. |
+| Webhook error: `x509: certificate signed by unknown authority` | LBC webhook cert not yet propagated. Prevented by the wave gap (LBC at wave 2, Ingresses at wave 6+), but can still occur if ArgoCD is force-synced out of order. Wait for LBC pods to be fully ready before re-syncing. |
+
+For operational incidents see the runbooks:
+
+| Symptom | Runbook |
+|---------|---------|
+| Ingress stuck in `Pending` / no ALB created / ALB returns 503 | [alb-503.md](../../docs/runbooks/alb-503.md) |
+| DNS record not created in Route53 | [externaldns-not-creating-record.md](../../docs/runbooks/externaldns-not-creating-record.md) |

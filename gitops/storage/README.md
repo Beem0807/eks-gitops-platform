@@ -101,7 +101,11 @@ kubectl get pv
 
 | Symptom | Fix |
 |---------|-----|
-| PVC stuck in `Pending` | Check CSI controller logs: `kubectl logs -n kube-system -l app=ebs-csi-controller -c csi-provisioner`. Confirm the IRSA role ARN is correct on the controller service account: `kubectl get sa ebs-csi-controller-sa -n kube-system -o yaml`. |
 | `StorageClass "gp3" not found` | The EBS CSI Driver app may not have synced yet. Check ArgoCD: `kubectl get app aws-ebs-csi-driver -n argocd`. |
-| Volume stuck in `Attaching` | The EBS volume may be in a different AZ than the pod. `WaitForFirstConsumer` prevents this for new PVCs, but an existing volume cannot be moved. Delete the PVC and PV and let them be recreated. |
 | Volume not deleted after PVC deletion | Expected - `Retain` policy. To delete manually: `aws ec2 delete-volume --volume-id <vol-id> --region <region>`. |
+
+For operational incidents see the runbooks:
+
+| Symptom | Runbook |
+|---------|---------|
+| PVC stuck in `Pending` / pod stuck in `ContainerCreating` / volume stuck in `Attaching` | [ebs-pvc-not-mounting.md](../../docs/runbooks/ebs-pvc-not-mounting.md) |
