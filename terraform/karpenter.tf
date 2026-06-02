@@ -12,9 +12,9 @@ module "karpenter" {
 
   create_pod_identity_association = true
 
-  create_node_iam_role   = true
-  node_iam_role_name     = "${var.cluster_name}-karpenter-node"
-  create_access_entry    = true
+  create_node_iam_role    = true
+  node_iam_role_name      = "${var.cluster_name}-karpenter-node"
+  create_access_entry     = true
   create_instance_profile = true
 
   enable_spot_termination = true
