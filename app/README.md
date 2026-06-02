@@ -124,9 +124,9 @@ The workflow at `.github/workflows/app-image.yaml` automatically builds, scans, 
 
 ### Steps
 
-1. **Build** — builds a `linux/amd64` image locally (not pushed) for scanning.
-2. **Scan** — Trivy scans for `CRITICAL` and `HIGH` vulnerabilities (ignoring unfixed ones). The job fails and the PR is blocked if any are found. Results are posted as a comment on the PR and uploaded to the GitHub Security tab (SARIF).
-3. **Push** — on merge to `main` only, rebuilds as a multi-platform manifest (`linux/amd64` + `linux/arm64`) and pushes to Docker Hub.
+1. **Build** - builds a `linux/amd64` image locally (not pushed) for scanning.
+2. **Scan** - Trivy scans for `CRITICAL` and `HIGH` vulnerabilities (ignoring unfixed ones). The job fails and the PR is blocked if any are found. Results are posted as a comment on the PR and uploaded to the GitHub Security tab (SARIF).
+3. **Push** - on merge to `main` only, rebuilds as a multi-platform manifest (`linux/amd64` + `linux/arm64`) and pushes to Docker Hub.
 
 ### Tagging strategy
 

@@ -1,4 +1,5 @@
 data "aws_iam_policy_document" "cluster_autoscaler" {
+  #checkov:skip=CKV_AWS_356: autoscaling:Describe* and ec2:Describe* do not support resource-level ARNs in AWS; write actions are tag-condition scoped
   statement {
     sid    = "ClusterAutoscalerWrite"
     effect = "Allow"

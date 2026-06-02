@@ -1,4 +1,5 @@
 data "aws_iam_policy_document" "external_dns" {
+  #checkov:skip=CKV_AWS_356: route53:List* actions do not support resource-level ARNs in AWS
   statement {
     sid    = "ExternalDNSChangeRecords"
     effect = "Allow"

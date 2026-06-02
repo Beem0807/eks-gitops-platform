@@ -1,3 +1,7 @@
+terraform {
+  required_version = "~> 1.14"
+}
+
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 21.0"
@@ -10,7 +14,7 @@ module "eks" {
   create_cloudwatch_log_group            = true
   cloudwatch_log_group_retention_in_days = 90
 
-  endpoint_public_access       = true
+  endpoint_public_access = true
 
   enable_cluster_creator_admin_permissions = true
 

@@ -3,11 +3,6 @@ variable "cluster_name" {
   type        = string
 }
 
-variable "aws_region" {
-  description = "AWS region"
-  type        = string
-}
-
 variable "vpc_id" {
   description = "VPC ID where the cluster will be deployed"
   type        = string
