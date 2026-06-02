@@ -32,7 +32,7 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 
 | | |
 |-|-|
-| [.github/README.md](.github/README.md) | CI workflows - triggers, steps, required secrets, branch protection |
+| [.github/CI.md](.github/CI.md) | CI workflows - triggers, steps, required secrets, branch protection |
 | [app/README.md](app/README.md) | Docker image, CI pipeline, endpoints, container security |
 | [terraform/README.md](terraform/README.md) | Infrastructure provisioning, bootstrap module, remote state |
 | [charts/namespaces/README.md](charts/namespaces/README.md) | Namespace management chart - creates namespaces and ResourceQuotas from a values list |
@@ -202,7 +202,7 @@ bash terraform/scripts/upgrade.sh
 ```
 .
 ├── .github/
-│   ├── README.md                               # CI workflows - triggers, steps, secrets, branch protection
+│   ├── CI.md                                   # CI workflows - triggers, steps, secrets, branch protection
 │   └── workflows/
 │       ├── app-image.yaml                      # CI - build, scan, and push Docker image to Docker Hub
 │       ├── terraform-ci.yaml                   # CI - format, validate, lint, and security scan Terraform
