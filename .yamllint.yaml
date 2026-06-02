@@ -5,6 +5,7 @@ ignore: |
   charts/*/templates/**
 
 rules:
+  document-start: disable
   line-length:
     max: 150
     level: warning

@@ -119,7 +119,6 @@ jobs:
             -strict \
             -ignore-missing-schemas \
             -kubernetes-version 1.34.0 \
-            -recursive \
             gitops/ \
             2>&1 | tee $GITHUB_WORKSPACE/kubeconform-gitops-report.txt
 

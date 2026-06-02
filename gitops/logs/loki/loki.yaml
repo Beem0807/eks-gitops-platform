@@ -89,7 +89,7 @@ spec:
               extraVolumeMounts:
                 - name: loki-data
                   mountPath: /var/loki
-            
+
             ruler:
               enabled: false
 
