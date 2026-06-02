@@ -122,6 +122,22 @@ jobs:
             gitops/ \
             2>&1 | tee $GITHUB_WORKSPACE/kubeconform-gitops-report.txt
 
+      - name: Validate ApplicationSet Go template options
+        id: appset_gotemplate
+        run: |
+          failed=0
+          while IFS= read -r file; do
+            if ! grep -q "goTemplate: true" "$file"; then
+              echo "FAIL: $file — missing 'goTemplate: true'"
+              failed=1
+            fi
+            if ! grep -q "missingkey=error" "$file"; then
+              echo "FAIL: $file — missing 'missingkey=error' in goTemplateOptions"
+              failed=1
+            fi
+          done < <(grep -rl "kind: ApplicationSet" gitops/ --include="*.yaml")
+          exit $failed
+
       - name: Post results as PR comment
         if: failure() && github.event_name == 'pull_request'
         uses: actions/github-script@v7
