@@ -1,9 +1,13 @@
 variable "aws_region" {
-  default = "ap-south-1"
+  description = "AWS region"
+  type        = string
+  default     = "ap-south-1"
 }
 
 variable "cluster_name" {
-  default = "simple-eks"
+  description = "Name of the EKS cluster"
+  type        = string
+  default     = "simple-eks"
 }
 
 variable "vpc_name" {
@@ -12,10 +16,14 @@ variable "vpc_name" {
 }
 
 variable "vpc_cidr" {
-  default = "10.0.0.0/24"
+  description = "CIDR block for the VPC"
+  type        = string
+  default     = "10.0.0.0/24"
 }
 
 variable "azs" {
+  description = "List of availability zones"
+  type        = list(string)
   default = [
     "ap-south-1a",
     "ap-south-1b"
@@ -23,6 +31,8 @@ variable "azs" {
 }
 
 variable "public_subnets" {
+  description = "List of public subnet CIDR blocks"
+  type        = list(string)
   default = [
     "10.0.0.0/26",
     "10.0.0.64/26"
@@ -30,6 +40,8 @@ variable "public_subnets" {
 }
 
 variable "private_subnets" {
+  description = "List of private subnet CIDR blocks"
+  type        = list(string)
   default = [
     "10.0.0.128/26",
     "10.0.0.192/26"
@@ -37,10 +49,14 @@ variable "private_subnets" {
 }
 
 variable "instance_type" {
-  default = "m6a.large"
+  description = "EC2 instance type for the node group"
+  type        = string
+  default     = "m6a.large"
 }
 
 variable "tags" {
+  description = "Tags to apply to all resources"
+  type        = map(string)
   default = {
     Project   = "simple-eks"
     ManagedBy = "Terraform"
@@ -65,17 +81,6 @@ variable "node_max_size" {
   default     = 2
 }
 
-variable "enable_nlb_nodeport_rule" {
-  description = "Enable node security group rule for NodePort access from NLB"
-  type        = bool
-  default     = false
-}
-
-variable "environment" {
-  description = "Environment name used in Argo CD cluster metadata"
-  type        = string
-  default     = "prod"
-}
 
 variable "domain_name" {
   description = "Route53 Domain Name"

@@ -1,3 +1,7 @@
+terraform {
+  required_version = "~> 1.14"
+}
+
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 21.0"
