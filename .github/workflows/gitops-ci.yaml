@@ -1,0 +1,213 @@
+name: GitOps CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'gitops/**'
+      - 'k8s/**'
+      - 'charts/**'
+      - '.github/workflows/gitops-ci.yaml'
+  workflow_dispatch:
+
+jobs:
+  helm:
+    name: Helm
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Install kubeconform
+        run: |
+          curl -sL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
+            | tar xz kubeconform
+          sudo mv kubeconform /usr/local/bin/
+
+      - name: helm lint
+        id: helm_lint
+        run: |
+          set -o pipefail
+          helm lint charts/simple-time-service charts/namespaces charts/raw \
+            2>&1 | tee $GITHUB_WORKSPACE/helm-lint-report.txt
+
+      - name: helm template | kubeconform
+        id: helm_kubeconform
+        run: |
+          set -o pipefail
+          {
+            helm template charts/simple-time-service
+            helm template charts/namespaces
+          } | kubeconform -summary -strict -kubernetes-version 1.34.0 - \
+            2>&1 | tee $GITHUB_WORKSPACE/helm-kubeconform-report.txt
+
+      - name: Post results as PR comment
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const lint = fs.existsSync('helm-lint-report.txt')
+              ? fs.readFileSync('helm-lint-report.txt', 'utf8').trim() : '';
+            const kubeconform = fs.existsSync('helm-kubeconform-report.txt')
+              ? fs.readFileSync('helm-kubeconform-report.txt', 'utf8').trim() : '';
+            let body = '## Helm Validation Results\n';
+            if (lint) body += `### helm lint\n\`\`\`\n${lint}\n\`\`\`\n`;
+            if (kubeconform) body += `### helm template | kubeconform\n\`\`\`\n${kubeconform}\n\`\`\`\n`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body.startsWith('## Helm Validation Results'));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+  manifests:
+    name: Manifests
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install kubeconform
+        run: |
+          curl -sL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
+            | tar xz kubeconform
+          sudo mv kubeconform /usr/local/bin/
+
+      - name: kubeconform (k8s/)
+        id: kube_k8s
+        run: |
+          set -o pipefail
+          kubeconform -summary -strict -kubernetes-version 1.34.0 k8s/ \
+            2>&1 | tee $GITHUB_WORKSPACE/kubeconform-k8s-report.txt
+
+      - name: kubeconform (gitops/)
+        id: kube_gitops
+        run: |
+          set -o pipefail
+          kubeconform \
+            -summary \
+            -strict \
+            -ignore-missing-schemas \
+            -kubernetes-version 1.34.0 \
+            -recursive \
+            gitops/ \
+            2>&1 | tee $GITHUB_WORKSPACE/kubeconform-gitops-report.txt
+
+      - name: Post results as PR comment
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const k8s = fs.existsSync('kubeconform-k8s-report.txt')
+              ? fs.readFileSync('kubeconform-k8s-report.txt', 'utf8').trim() : '';
+            const gitops = fs.existsSync('kubeconform-gitops-report.txt')
+              ? fs.readFileSync('kubeconform-gitops-report.txt', 'utf8').trim() : '';
+            let body = '## Kubeconform Results\n';
+            if (k8s) body += `### k8s/\n\`\`\`\n${k8s}\n\`\`\`\n`;
+            if (gitops) body += `### gitops/\n\`\`\`\n${gitops}\n\`\`\`\n`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body.startsWith('## Kubeconform Results'));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+  yaml-lint:
+    name: YAML lint
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install yamllint
+        run: pip install yamllint
+
+      - name: yamllint
+        id: yamllint
+        run: |
+          set -o pipefail
+          yamllint gitops/ k8s/ charts/ \
+            2>&1 | tee $GITHUB_WORKSPACE/yamllint-report.txt
+
+      - name: Post results as PR comment
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.existsSync('yamllint-report.txt')
+              ? fs.readFileSync('yamllint-report.txt', 'utf8').trim()
+              : 'No report generated.';
+            const body = `## yamllint Results\n\`\`\`\n${report}\n\`\`\``;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body.startsWith('## yamllint Results'));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
