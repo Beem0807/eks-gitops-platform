@@ -80,15 +80,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run Checkov
-        id: checkov
+      - name: Run Checkov (table report)
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: terraform
+          framework: terraform
+          output_format: cli
+          soft_fail: false
+
+      - name: Run Checkov (SARIF + PR report)
+        if: always()
         uses: bridgecrewio/checkov-action@v12
         with:
           directory: terraform
           framework: terraform
           output_format: cli,sarif
-          output_file_path: console,checkov-results.sarif
-          soft_fail: false
+          output_file_path: checkov-pr-report.txt,checkov-results.sarif
+          soft_fail: true
 
       - name: Upload Checkov results to GitHub Security tab
         if: always()
@@ -97,22 +105,21 @@ jobs:
           sarif_file: checkov-results.sarif
 
       - name: Post Checkov results as PR comment
-        if: failure() && github.event_name == 'pull_request'
+        if: always() && github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
-            const body = [
-              '## Checkov Security Scan Failed',
-              '',
-              'Checkov found security issues in the Terraform configuration.',
-              'Check the **Security** tab or the job logs for the full report.',
-            ].join('\n');
+            const fs = require('fs');
+            const report = fs.existsSync('checkov-pr-report.txt')
+              ? fs.readFileSync('checkov-pr-report.txt', 'utf8').trim()
+              : 'No report generated.';
+            const body = `## Checkov Terraform Scan Results\n\`\`\`\n${report}\n\`\`\``;
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
             });
-            const existing = comments.find(c => c.body.startsWith('## Checkov Security Scan'));
+            const existing = comments.find(c => c.body.startsWith('## Checkov Terraform Scan Results'));
             if (existing) {
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
