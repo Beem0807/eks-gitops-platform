@@ -9,7 +9,7 @@ The `gitops/networking/` directory deploys two ArgoCD apps that together handle 
 
 Both run on core nodes and use IRSA for AWS API access.
 
-> **Why wave 2?** LBC generates a self-signed CA and injects it into its `ValidatingWebhookConfiguration` after the pod starts. If an Ingress resource is applied before the cert is propagated, the Kubernetes API server rejects the admission webhook call with `x509: certificate signed by unknown authority`. Putting LBC in wave 2 (its own wave, ahead of all Ingresses at wave 6) ensures the webhook is fully initialised before any Ingress is created.
+> **Why wave 2?** See [design decision #16](../../docs/design-decisions.md#16-aws-load-balancer-controller-instead-of-nginx-ingress) - the gap to wave 6 is intentional to allow the admission webhook cert to propagate before any Ingress is applied.
 
 ---
 

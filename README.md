@@ -51,6 +51,8 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 | [gitops/alerts/README.md](gitops/alerts/README.md) | PrometheusRules, Slack alerting, silencing, grouping |
 | [gitops/logs/README.md](gitops/logs/README.md) | Loki S3 backend, Fluent Bit, log querying in Grafana |
 | [gitops/security/README.md](gitops/security/README.md) | Kyverno policies, Policy Reporter UI, inspecting policy reports |
+| **Design** | |
+| [docs/design-decisions.md](docs/design-decisions.md) | Why each architectural choice was made - tool selection, configuration defaults, and demo trade-offs |
 
 ---
 
@@ -361,31 +363,9 @@ bash terraform/scripts/upgrade.sh
 
 ---
 
-## Design notes
+## Design decisions
 
-### Architectural decisions
-
-These are production-grade patterns used throughout the platform, documented here to explain the reasoning.
-
-- **ArgoCD project scoping** - every ApplicationSet is assigned to one of six AppProjects (`bootstrap`, `namespaces`, `platform`, `observability`, `security`, `workloads`). Each project restricts which source repos, destination namespaces, and cluster-scoped resource kinds are permitted, preventing a misconfigured app from deploying outside its intended scope. Projects are applied by `bootstrap.sh` before the root app so they exist before ArgoCD first syncs; subsequent changes are auto-reconciled via GitOps. See [gitops/README.md](gitops/README.md#argocd-projects) for the full project breakdown.
-- **Core/workload node split** - managed node group nodes are tainted `app=core:NoSchedule` and run system components. Karpenter provisions separate workload nodes (tainted `app=workload:NoSchedule`) for the application. This keeps system stability independent of application scaling - a misbehaving workload cannot starve the control plane components.
-- **ArgoCD self-managed via Helm** - bootstrapped once by `bootstrap.sh`, then manages its own upgrades and config through Git (`gitops/argocd/argocd.yaml`). All ArgoCD changes are auditable and reversible via the same GitOps workflow as everything else. The initial `helm install` is unavoidable (you need the engine running before it can manage itself), but it is the only manual step.
-- **Prometheus CRDs managed separately** - `prometheus-crds.yaml` installs CRDs at sync-wave 0 before `kube-prometheus-stack`. This decouples CRD lifecycle from the operator release, allowing CRD upgrades without touching the operator and avoiding the Helm CRD upgrade limitation.
-- **EBS CSI Driver and persistent storage** - the EBS CSI Driver runs at sync-wave 1 so storage is available before any stateful workload installs. It creates a `gp3` StorageClass set as the cluster default (`WaitForFirstConsumer`, `Retain` reclaim policy, encryption enabled). Prometheus uses a 20 Gi PVC for its TSDB, Alertmanager uses a 2 Gi PVC for state (silences, notifications), and Thanos Compactor and StoreGateway each use their own PVCs (10 Gi and 5 Gi respectively). Loki uses S3 for chunk and index storage so no EBS volume is needed.
-- **Loki S3 storage** - Loki runs in SingleBinary mode with S3 as its object store backend. The bucket name is injected into the ArgoCD cluster secret as `loki-bucket-name` by `bootstrap.sh`/`upgrade.sh`, resolved at sync time via the ApplicationSet cluster generator, and consumed as `lokiBucketName` in Helm values. The Loki service account is annotated with an IRSA role that grants scoped read/write access to the Loki bucket - no static credentials are required.
-- **Thanos long-term retention** - Prometheus ships blocks to an S3 bucket via the Thanos sidecar. Compactor enforces retention (30d raw / 90d 5m / 180d 1h). StoreGateway serves historical queries. Query runs alongside Prometheus for a unified query endpoint.
-- **Prometheus Adapter** - bridges Prometheus metrics into the Kubernetes custom metrics API. Enables HPA rules that scale on arbitrary Prometheus queries rather than just CPU/memory.
-
-### Demo trade-offs
-
-These are intentional shortcuts for a demo environment, with the production-ready alternative noted.
-
-- **Single NAT gateway** - reduces cost; use one per AZ in production for fault tolerance.
-- **Public EKS API endpoint** - acceptable for demos; restrict `public_access_cidrs` and consider enabling a private endpoint with VPN/bastion access in production. Enable control plane audit logging for any environment with real workloads.
-- **EKS 1.34** - cluster runs Kubernetes 1.34. Pin to the latest supported version and track the EKS support window (~14 months per minor version) before going to production.
-- **Prometheus Operator TLS and webhooks disabled** - simplifies initial bootstrap reliability; re-enable for production deployments.
-- **Prometheus and Alertmanager no ingress** - neither UI is exposed publicly; access is via `kubectl port-forward` only. This avoids the need for auth on those endpoints in the demo. For production, expose them behind OIDC/OAuth2 (e.g. oauth2-proxy) rather than open ALB ingress.
-- **Network Policy disabled by default** - the chart includes a `NetworkPolicy` resource but it is off by default, meaning there is no east-west traffic isolation between namespaces. Enabling it requires two steps: turning on the VPC CNI Network Policy controller in Terraform, then setting `networkPolicy.enabled: true` in the ArgoCD ApplicationSet. See [gitops/README.md](gitops/README.md#network-policy).
+Architectural choices, tool selections, configuration defaults, and demo trade-offs are documented in [docs/design-decisions.md](docs/design-decisions.md).
 
 ---
 

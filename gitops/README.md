@@ -214,22 +214,22 @@ Any push to `main` affecting `gitops/` or `charts/` is automatically applied wit
 
 ## Sync wave strategy
 
-ArgoCD advances through sync waves sequentially, waiting for all resources in the current wave to be healthy before starting the next. The wave ordering is designed to eliminate race conditions caused by admission webhook cert propagation and operator readiness.
+ArgoCD advances through sync waves sequentially, waiting for all resources in the current wave to be healthy before starting the next. For the rationale behind each boundary, see [design decision #18](../docs/design-decisions.md#18-argocd-sync-wave-ordering).
 
-| Wave | Components | Why this boundary |
-|------|-----------|-------------------|
-| -1 | **cluster-namespaces** | All namespaces created before any app attempts to deploy into them |
-| 0 | Prometheus CRDs | CRDs must exist before any resource of those types is applied |
-| 1 | ESO, EBS CSI, Reloader, Cluster Autoscaler | Core infrastructure with no cross-dependencies |
-| 2 | **LBC**, ExternalDNS | Network controllers given their own wave so the LBC admission webhook cert has time to propagate before any Ingress is applied |
-| 3 | Karpenter, Velero, **Kyverno** | All three install admission webhooks; a one-wave gap after LBC lets all webhook cert chains stabilise |
-| 4 | ClusterSecretStore, Karpenter NodePools | Require wave 1 (ESO) and wave 3 (Karpenter) webhook certs to be stable |
-| 5 | All ExternalSecrets, VeleroSchedule, Kyverno ClusterPolicies | Require ClusterSecretStore (wave 4) to be ready before they can sync from Secrets Manager |
-| 6 | **ArgoCD Ingress**, Loki, Policy Reporter UI | Ingresses applied 4 waves after LBC - webhook cert fully propagated |
-| 7 | Prometheus (kube-prometheus-stack) | Requires secrets (wave 5) and LBC for Grafana Ingress (wave 2 mature) |
-| 8 | SimpleTimeService, Fluent Bit, Grafana datasource + dashboard | Require Loki (wave 6) and Prometheus (wave 7) |
-| 9 | Prometheus Adapter, AlertmanagerConfig | Require Prometheus to be running |
-| 10 | PrometheusRules, Thanos | Require Prometheus with Thanos sidecar healthy |
+| Wave | Components |
+|------|-----------|
+| -1 | **cluster-namespaces** |
+| 0 | Prometheus CRDs |
+| 1 | ESO, EBS CSI, Reloader, Cluster Autoscaler |
+| 2 | **LBC**, ExternalDNS |
+| 3 | Karpenter, Velero, **Kyverno** |
+| 4 | ClusterSecretStore, Karpenter NodePools |
+| 5 | All ExternalSecrets, VeleroSchedule, Kyverno ClusterPolicies |
+| 6 | **ArgoCD Ingress**, Loki, Policy Reporter UI |
+| 7 | Prometheus (kube-prometheus-stack) |
+| 8 | SimpleTimeService, Fluent Bit, Grafana datasource + dashboard |
+| 9 | Prometheus Adapter, AlertmanagerConfig |
+| 10 | PrometheusRules, Thanos |
 
 > **Note:** The `loki`, `fluent-bit`, `grafana-loki-datasource`, and `simple-time-service-alerts` ApplicationSets previously had their sync-wave annotation only on the inner Application template rather than on the ApplicationSet itself, meaning root-app treated them as wave 0. The annotation is now correctly placed on `metadata.annotations` of each ApplicationSet.
 

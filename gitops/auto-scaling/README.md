@@ -93,7 +93,7 @@ Provisions **workload nodes** on demand when pods with `nodeSelector: {app: work
 
 Karpenter watches an SQS queue for EC2 lifecycle events and proactively drains affected nodes before they terminate, giving workloads time to reschedule gracefully.
 
-The queue and EventBridge rules are created by Terraform via `enable_spot_termination = true` in `terraform/karpenter.tf`. Despite the flag name, the rules cover all capacity types — not just spot:
+The queue and EventBridge rules are created by Terraform via `enable_spot_termination = true` in `terraform/karpenter.tf`. Despite the flag name, the rules cover all capacity types - not just spot:
 
 | EventBridge rule | Applies to | What Karpenter does |
 |-----------------|------------|---------------------|
@@ -102,7 +102,7 @@ The queue and EventBridge rules are created by Terraform via `enable_spot_termin
 | EC2 Instance State-change Notification | All nodes | Detects unexpected stops/terminations and cleans up |
 | AWS Health Events (scheduled maintenance / retirement) | All nodes | Drains node ahead of the maintenance window |
 
-Since this cluster uses **on-demand only**, spot interruptions never fire — but rebalance recommendations, state-change notifications, and AWS Health retirement events all apply and are actively handled.
+Since this cluster uses **on-demand only**, spot interruptions never fire - but rebalance recommendations, state-change notifications, and AWS Health retirement events all apply and are actively handled.
 
 The queue name is injected into the Karpenter Helm release at deploy time from the ArgoCD cluster secret annotation `cluster-name`:
 
