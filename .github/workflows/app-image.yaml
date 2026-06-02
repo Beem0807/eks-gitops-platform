@@ -16,11 +16,13 @@ on:
   workflow_dispatch:
 
 jobs:
-  docker:
+  build-and-scan:
     runs-on: ubuntu-latest
 
     permissions:
       contents: read
+      security-events: write
+      pull-requests: write
 
     steps:
       - name: Checkout
@@ -48,12 +50,96 @@ jobs:
             type=sha,format=short,prefix=
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push image
+      - name: Build image for scanning
+        uses: docker/build-push-action@v6
+        with:
+          context: ./app
+          file: ./app/Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: simple-time-service:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan image with Trivy (table report)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: simple-time-service:scan
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+      - name: Scan image with Trivy (SARIF for Security tab)
+        if: always()
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: simple-time-service:scan
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: '0'
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+      - name: Upload Trivy results to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
+      - name: Scan image with Trivy (PR comment report)
+        if: always() && github.event_name == 'pull_request'
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: simple-time-service:scan
+          format: table
+          output: trivy-pr-report.txt
+          exit-code: '0'
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+      - name: Post Trivy results as PR comment
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.existsSync('trivy-pr-report.txt')
+              ? fs.readFileSync('trivy-pr-report.txt', 'utf8').trim()
+              : 'No report generated.';
+            const body = `## Trivy Image Scan Results\n\`\`\`\n${report}\n\`\`\``;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body.startsWith('## Trivy Image Scan Results'));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Build and push multi-platform image
+        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: ./app
           file: ./app/Dockerfile
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
