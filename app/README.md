@@ -112,21 +112,27 @@ image: docker.io/<your-dockerhub-username>/simple-time-service:latest
 
 ## CI - GitHub Actions
 
-The workflow at `.github/workflows/app-image.yaml` automatically builds and pushes the Docker image to Docker Hub.
+The workflow at `.github/workflows/app-image.yaml` automatically builds, scans, and pushes the Docker image to Docker Hub.
 
 ### Triggers
 
 | Event | Condition | Behaviour |
 |-------|-----------|-----------|
-| Push to `main` | Files under `app/**` or the workflow file changed | Build + push |
-| Pull request | Same path filter | Build only (no push) |
-| `workflow_dispatch` | Manual trigger from the Actions UI | Build + push |
+| Push to `main` | Files under `app/**` or the workflow file changed | Build → scan → push |
+| Pull request to `main` | Same path filter | Build → scan (no push); results posted as PR comment |
+| `workflow_dispatch` | Manual trigger from the Actions UI | Build → scan → push |
+
+### Steps
+
+1. **Build** — builds a `linux/amd64` image locally (not pushed) for scanning.
+2. **Scan** — Trivy scans for `CRITICAL` and `HIGH` vulnerabilities (ignoring unfixed ones). The job fails and the PR is blocked if any are found. Results are posted as a comment on the PR and uploaded to the GitHub Security tab (SARIF).
+3. **Push** — on merge to `main` only, rebuilds as a multi-platform manifest (`linux/amd64` + `linux/arm64`) and pushes to Docker Hub.
 
 ### Tagging strategy
 
 | Tag | When applied | Notes |
 |-----|-------------|-------|
-| Short commit SHA (e.g. `a1b2c3d`) | Every build | Immutable per-commit reference |
+| Short commit SHA (e.g. `a1b2c3d`) | Every push to `main` | Immutable per-commit reference |
 | `latest` | Push to `main` only | Tracks the current `main` - includes Prometheus `/metrics` endpoint |
 | `v1` | Pinned manually | Baseline version without metrics |
 
@@ -140,6 +146,12 @@ Before the workflow can push to Docker Hub, add these two secrets to the reposit
 | `DOCKERHUB_TOKEN` | A Docker Hub access token (not your password) |
 
 Generate a token at **Docker Hub → Account Settings → Personal access tokens**.
+
+### Branch protection
+
+To enforce that the scan must pass before a PR can be merged, configure a branch protection rule on `main`:
+
+**Settings → Branches → Add rule → Require status checks to pass → add `build-and-scan`**
 
 ---
 
