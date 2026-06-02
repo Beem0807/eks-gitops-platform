@@ -32,6 +32,7 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 
 | | |
 |-|-|
+| [.github/README.md](.github/README.md) | CI workflows - triggers, steps, required secrets, branch protection |
 | [app/README.md](app/README.md) | Docker image, CI pipeline, endpoints, container security |
 | [terraform/README.md](terraform/README.md) | Infrastructure provisioning, bootstrap module, remote state |
 | [charts/namespaces/README.md](charts/namespaces/README.md) | Namespace management chart - creates namespaces and ResourceQuotas from a values list |
@@ -201,8 +202,10 @@ bash terraform/scripts/upgrade.sh
 ```
 .
 ├── .github/
+│   ├── README.md                               # CI workflows - triggers, steps, secrets, branch protection
 │   └── workflows/
-│       └── app-image.yaml                      # CI - build and push Docker image to Docker Hub
+│       ├── app-image.yaml                      # CI - build, scan, and push Docker image to Docker Hub
+│       └── terraform-ci.yaml                   # CI - format, validate, lint, and security scan Terraform
 ├── compose.yaml                                # Docker Compose for local development
 ├── app/
 │   ├── Dockerfile
@@ -342,6 +345,8 @@ bash terraform/scripts/upgrade.sh
     ├── loki.tf                                 # S3 bucket + IRSA role for Loki object storage
     ├── velero.tf                               # S3 bucket + IRSA role for Velero backups
     ├── secrets-manager.tf                      # AWS Secrets Manager secrets (ArgoCD, Grafana, Slack)
+    ├── .tflint.hcl                             # TFLint AWS ruleset plugin config
+    ├── .checkov.yaml                           # Checkov global skip rules (documented false positives)
     ├── scripts/                                # Shell scripts for full GitOps lifecycle
     │   ├── bootstrap.sh                        # End-to-end: terraform + ArgoCD Helm + projects + root-app
     │   ├── upgrade.sh                          # Re-apply terraform + refresh cluster secret + force ExternalSecret sync
