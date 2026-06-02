@@ -22,6 +22,7 @@ jobs:
 
     permissions:
       contents: read
+      pull-requests: write
 
     steps:
       - name: Checkout
@@ -64,8 +65,40 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
 
       - name: TFLint
-        run: tflint --recursive
+        run: tflint --recursive 2>&1 | tee $GITHUB_WORKSPACE/tflint-report.txt; exit ${PIPESTATUS[0]}
         working-directory: terraform
+
+      - name: Post TFLint results as PR comment
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.existsSync('tflint-report.txt')
+              ? fs.readFileSync('tflint-report.txt', 'utf8').trim()
+              : 'No report generated.';
+            const body = `## TFLint Results\n\`\`\`\n${report}\n\`\`\``;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body.startsWith('## TFLint Results'));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
 
   security:
     name: Security scan
