@@ -34,6 +34,8 @@ resource "aws_s3_bucket_public_access_block" "velero" {
 }
 
 data "aws_iam_policy_document" "velero" {
+  #checkov:skip=CKV_AWS_111: ec2:CreateSnapshot and ec2:Describe* do not support resource-level ARNs in AWS
+  #checkov:skip=CKV_AWS_356: ec2:CreateSnapshot and ec2:Describe* do not support resource-level ARNs in AWS
   statement {
     sid    = "VeleroBucketAccess"
     effect = "Allow"

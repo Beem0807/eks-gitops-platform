@@ -1,0 +1,14 @@
+skip-check:
+  # Terraform module sources
+  - CKV_TF_1    # Registry modules use version pinning, not commit hashes (applies to git:// sources only)
+
+  # Secrets Manager
+  - CKV_AWS_149  # Using default Secrets Manager encryption; CMK not required for this environment
+  - CKV2_AWS_57  # Automatic rotation requires a Lambda rotator; secrets are manually managed in this platform
+
+  # S3 buckets (loki, thanos, velero)
+  - CKV_AWS_18   # S3 access logging not required for internal observability and backup buckets
+  - CKV_AWS_144  # Cross-region replication not required for a single-region demo deployment
+  - CKV_AWS_145  # SSE-S3 (default encryption) is sufficient; KMS CMK not required for this environment
+  - CKV2_AWS_61  # Lifecycle policies are managed by the applications (Loki, Thanos, Velero) not at the bucket level
+  - CKV2_AWS_62  # S3 event notifications not required for observability and backup buckets
