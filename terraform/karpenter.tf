@@ -21,7 +21,7 @@ module "karpenter" {
   queue_name              = "${var.cluster_name}-karpenter-interruption"
 
   tags = merge(
-    var.tags,
+    local.common_tags,
     {
       "karpenter.sh/discovery" = var.cluster_name
     }

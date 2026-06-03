@@ -6,7 +6,7 @@ module "vpc" {
   azs                             = var.azs
   public_subnets                  = var.public_subnets
   private_subnets                 = var.private_subnets
-  tags                            = var.tags
+  tags                            = local.common_tags
   enable_karpenter_discovery_tags = var.enable_karpenter_discovery_tags
   cluster_name                    = var.enable_karpenter_discovery_tags ? var.cluster_name : null
 }
@@ -21,7 +21,7 @@ module "eks" {
   node_desired_size               = var.node_desired_size
   node_min_size                   = var.node_min_size
   node_max_size                   = var.node_max_size
-  tags                            = var.tags
+  tags                            = local.common_tags
   add_cluster_autoscaler_tags     = var.add_cluster_autoscaler_tags
   enable_karpenter_discovery_tags = var.enable_karpenter_discovery_tags
 }

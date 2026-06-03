@@ -14,5 +14,5 @@ module "ebs_csi_controller_irsa" {
     }
   }
 
-  tags = var.tags
+  tags = local.common_tags
 }

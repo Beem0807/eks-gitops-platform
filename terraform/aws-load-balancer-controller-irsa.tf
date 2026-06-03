@@ -7,7 +7,7 @@ resource "aws_iam_policy" "aws_load_balancer_controller" {
   description = "IAM policy for AWS Load Balancer Controller"
   policy      = data.http.aws_load_balancer_controller_policy.response_body
 
-  tags = var.tags
+  tags = local.common_tags
 }
 
 module "aws_load_balancer_controller_irsa" {
@@ -28,5 +28,5 @@ module "aws_load_balancer_controller_irsa" {
     aws_load_balancer_controller = aws_iam_policy.aws_load_balancer_controller.arn
   }
 
-  tags = var.tags
+  tags = local.common_tags
 }

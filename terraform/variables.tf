@@ -63,6 +63,12 @@ variable "tags" {
   }
 }
 
+locals {
+  common_tags = merge(var.tags, {
+    Environment = var.environment
+  })
+}
+
 variable "node_desired_size" {
   type        = number
   description = "Desired number of EKS worker nodes"
@@ -119,6 +125,12 @@ variable "alertmanager_slack_webhook_url" {
   type        = string
   default     = ""
   sensitive   = true
+}
+
+variable "environment" {
+  description = "Deployment environment name (e.g. prod, staging)"
+  type        = string
+  default     = "prod"
 }
 
 variable "add_cluster_autoscaler_tags" {

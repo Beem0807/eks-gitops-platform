@@ -9,7 +9,7 @@ resource "aws_secretsmanager_secret" "argocd_admin" {
   description             = "Argo CD admin password"
   recovery_window_in_days = 0
 
-  tags = merge(var.tags, {
+  tags = merge(local.common_tags, {
     ExternalSecret = "true"
   })
 }
@@ -35,7 +35,7 @@ resource "aws_secretsmanager_secret" "grafana_admin" {
   description             = "Grafana admin credentials"
   recovery_window_in_days = 0
 
-  tags = merge(var.tags, {
+  tags = merge(local.common_tags, {
     ExternalSecret = "true"
   })
 }
@@ -55,7 +55,7 @@ resource "aws_secretsmanager_secret" "alertmanager_webhook" {
   description             = "Alertmanager Slack webhook URL"
   recovery_window_in_days = 0
 
-  tags = merge(var.tags, {
+  tags = merge(local.common_tags, {
     ExternalSecret = "true"
   })
 }

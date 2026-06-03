@@ -1,7 +1,7 @@
 resource "aws_s3_bucket" "thanos" {
   bucket = "${var.cluster_name}-thanos-metrics-${data.aws_caller_identity.current.account_id}-${var.aws_region}"
 
-  tags = merge(var.tags, {
+  tags = merge(local.common_tags, {
     Name = "${var.cluster_name}-thanos-metrics"
   })
 }
@@ -72,7 +72,7 @@ resource "aws_iam_policy" "thanos_s3" {
   description = "S3 access policy for Thanos object storage"
   policy      = data.aws_iam_policy_document.thanos_s3.json
 
-  tags = var.tags
+  tags = local.common_tags
 }
 
 module "thanos_prometheus_irsa" {
@@ -96,7 +96,7 @@ module "thanos_prometheus_irsa" {
     thanos_s3 = aws_iam_policy.thanos_s3.arn
   }
 
-  tags = var.tags
+  tags = local.common_tags
 }
 
 module "thanos_components_irsa" {
@@ -121,5 +121,5 @@ module "thanos_components_irsa" {
     thanos_s3 = aws_iam_policy.thanos_s3.arn
   }
 
-  tags = var.tags
+  tags = local.common_tags
 }

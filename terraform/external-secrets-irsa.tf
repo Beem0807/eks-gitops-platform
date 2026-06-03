@@ -26,7 +26,7 @@ resource "aws_iam_policy" "external_secrets" {
   description = "IRSA policy for External Secrets Operator"
   policy      = data.aws_iam_policy_document.external_secrets.json
 
-  tags = var.tags
+  tags = local.common_tags
 }
 
 module "external_secrets_irsa" {
@@ -47,5 +47,5 @@ module "external_secrets_irsa" {
     external_secrets = aws_iam_policy.external_secrets.arn
   }
 
-  tags = var.tags
+  tags = local.common_tags
 }

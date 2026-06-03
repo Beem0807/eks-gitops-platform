@@ -1,7 +1,7 @@
 resource "aws_s3_bucket" "velero" {
   bucket = "${var.cluster_name}-velero-backups-${data.aws_caller_identity.current.account_id}-${var.aws_region}"
 
-  tags = merge(var.tags, {
+  tags = merge(local.common_tags, {
     Name = "${var.cluster_name}-velero-backups"
   })
 }
@@ -90,7 +90,7 @@ resource "aws_iam_policy" "velero" {
   description = "IAM policy for Velero backups - S3 object storage and EBS snapshots"
   policy      = data.aws_iam_policy_document.velero.json
 
-  tags = var.tags
+  tags = local.common_tags
 }
 
 module "velero_irsa" {
@@ -111,5 +111,5 @@ module "velero_irsa" {
     velero = aws_iam_policy.velero.arn
   }
 
-  tags = var.tags
+  tags = local.common_tags
 }

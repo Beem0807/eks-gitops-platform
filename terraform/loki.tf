@@ -1,7 +1,7 @@
 resource "aws_s3_bucket" "loki" {
   bucket = "${var.cluster_name}-loki-logs-${data.aws_caller_identity.current.account_id}-${var.aws_region}"
 
-  tags = merge(var.tags, {
+  tags = merge(local.common_tags, {
     Name = "${var.cluster_name}-loki-logs"
   })
 }
@@ -72,7 +72,7 @@ resource "aws_iam_policy" "loki_s3" {
   description = "S3 access policy for Loki object storage"
   policy      = data.aws_iam_policy_document.loki_s3.json
 
-  tags = var.tags
+  tags = local.common_tags
 }
 
 module "loki_irsa" {
@@ -93,5 +93,5 @@ module "loki_irsa" {
     loki_s3 = aws_iam_policy.loki_s3.arn
   }
 
-  tags = var.tags
+  tags = local.common_tags
 }

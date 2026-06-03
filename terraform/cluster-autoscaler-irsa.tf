@@ -69,5 +69,5 @@ module "cluster_autoscaler_irsa" {
     cluster_autoscaler = aws_iam_policy.cluster_autoscaler.arn
   }
 
-  tags = var.tags
+  tags = local.common_tags
 }

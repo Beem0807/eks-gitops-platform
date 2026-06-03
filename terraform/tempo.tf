@@ -1,7 +1,7 @@
 resource "aws_s3_bucket" "tempo" {
   bucket = "${var.cluster_name}-tempo-traces-${data.aws_caller_identity.current.account_id}-${var.aws_region}"
 
-  tags = merge(var.tags, {
+  tags = merge(local.common_tags, {
     Name = "${var.cluster_name}-tempo-traces"
   })
 }
@@ -72,7 +72,7 @@ resource "aws_iam_policy" "tempo_s3" {
   description = "S3 access policy for Tempo trace storage"
   policy      = data.aws_iam_policy_document.tempo_s3.json
 
-  tags = var.tags
+  tags = local.common_tags
 }
 
 module "tempo_irsa" {
@@ -93,5 +93,5 @@ module "tempo_irsa" {
     tempo_s3 = aws_iam_policy.tempo_s3.arn
   }
 
-  tags = var.tags
+  tags = local.common_tags
 }

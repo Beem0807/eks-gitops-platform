@@ -33,7 +33,7 @@ resource "aws_iam_policy" "external_dns" {
   description = "IRSA policy for ExternalDNS Route53 access"
   policy      = data.aws_iam_policy_document.external_dns.json
 
-  tags = var.tags
+  tags = local.common_tags
 }
 
 module "external_dns_irsa" {
@@ -54,5 +54,5 @@ module "external_dns_irsa" {
     external_dns = aws_iam_policy.external_dns.arn
   }
 
-  tags = var.tags
+  tags = local.common_tags
 }

@@ -50,6 +50,7 @@ spec:
                   s3:
                     bucket: {{ .values.tempoBucketName }}
                     region: {{ .values.region }}
+                    endpoint: s3.{{ .values.region }}.amazonaws.com
                     insecure: false
 
               resources:
