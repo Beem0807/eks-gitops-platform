@@ -120,6 +120,8 @@ Correlation is **bidirectional**:
 
 `derivedFields` applies a regex to each log line. Non-JSON lines that don't match are displayed unchanged — no errors, no broken layout.
 
+![Trace and log correlation](../../docs/images/trace-logs-correlation.png)
+
 ---
 
 ## Instrumenting an application
