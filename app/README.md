@@ -25,6 +25,9 @@ A minimal Python microservice that returns the current UTC timestamp and the cal
 - **Framework**: FastAPI + Uvicorn
 - **Container**: single-stage build based on `python:3.12-slim`, kept small by clearing pip cache.
 - **ASGI server**: Uvicorn (production-grade async Python server)
+- **Metrics**: `prometheus-fastapi-instrumentator` — `/metrics` endpoint scraped by Prometheus via ServiceMonitor
+- **Tracing**: OpenTelemetry SDK with OTLP HTTP exporter — a `TracerProvider` is always configured so every request gets a real span; spans are exported to Grafana Tempo only when `OTEL_EXPORTER_OTLP_ENDPOINT` is set
+- **Logging**: JSON-structured logs written to stdout; `trace_id` and `span_id` are injected into every log line for every HTTP request
 
 ---
 
@@ -36,7 +39,7 @@ A minimal Python microservice that returns the current UTC timestamp and the cal
 docker compose up --build
 ```
 
-The service is available at `http://localhost:8080`.
+The service is available at `http://localhost:8080`. Logs include `trace_id` and `span_id` on every request even without a collector.
 
 ### Docker only
 
@@ -66,13 +69,12 @@ Expected response:
 
 The image is published on Docker Hub under two distinct tags:
 
-| Tag | Metrics endpoint | Use when |
-|-----|-----------------|----------|
-| `v1` | No | You don't need Prometheus metrics |
-| `latest` | Yes (`/metrics`) | You want Prometheus scraping via ServiceMonitor |
+| Tag | Metrics | Tracing | Use when |
+|-----|---------|---------|----------|
+| `v1` | No | No | Pinned baseline — original service without instrumentation |
+| `latest` | Yes (`/metrics`) | Yes | Tracks `main` — full instrumentation; deploy with the Helm chart |
 
-> **`v1`** is a pinned baseline - the original service with no instrumentation.
-> **`latest`** tracks `main` and includes the Prometheus `/metrics` endpoint exposed by `prometheus-fastapi-instrumentator`. Use this tag when deploying with the Helm chart and `serviceMonitor.enabled=true`.
+> **`latest`** includes the Prometheus `/metrics` endpoint and OpenTelemetry tracing. Tracing is off by default and activates only when `OTEL_EXPORTER_OTLP_ENDPOINT` is set in the pod's environment. Use this tag when deploying with the Helm chart and `serviceMonitor.enabled=true`.
 
 ```bash
 # No metrics (baseline)
@@ -163,6 +165,49 @@ To enforce that the scan must pass before a PR can be merged, configure a branch
 - `securityContext.runAsNonRoot: true` enforced at the Pod level.
 - Fixed UID/GID ensures predictable security context behavior in Kubernetes.
 - Image built from minimal base image to reduce attack surface.
+
+---
+
+## Observability
+
+### Structured logging
+
+All logs are written to stdout as JSON. Every log line includes:
+
+| Field | Example | Notes |
+|-------|---------|-------|
+| `timestamp` | `2026-04-07T12:00:00.000000+00:00` | ISO-8601 UTC |
+| `level` | `INFO` | |
+| `logger` | `simple-time-service` | |
+| `message` | `Request completed: ...` | |
+| `trace_id` | `4bf92f3577b34da6...` | Present on every HTTP request |
+| `span_id` | `00f067aa0ba902b7` | Present on every HTTP request |
+
+`trace_id` and `span_id` are injected from the active OpenTelemetry span on every request. When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, the same span is also exported to Tempo, enabling a direct Loki → Tempo link from any log line.
+
+### Distributed tracing
+
+The platform uses a two-tier OpenTelemetry Collector topology:
+
+```
+Pod → OTel Agent (DaemonSet, node-local, :4318) → OTel Gateway (Deployment) → Tempo
+```
+
+The Helm chart injects the node IP at runtime via the downward API so the pod always reaches its local agent:
+
+| Variable | Set by | Value |
+|----------|--------|-------|
+| `NODE_IP` | Downward API (`status.hostIP`) | Node's internal IP |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Helm template | `http://$(NODE_IP):4318` |
+| `OTEL_SERVICE_NAME` | Helm values | `simple-time-service` |
+
+All three are injected automatically when `tracing.enabled: true` in `charts/simple-time-service/values.yaml`. The `/health` and `/metrics` endpoints are excluded from tracing to avoid noise.
+
+Locally, `trace_id` appears in logs without any collector. To also export spans, point the endpoint at a local OTel Collector or Tempo:
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 docker compose up --build
+```
 
 ---
 

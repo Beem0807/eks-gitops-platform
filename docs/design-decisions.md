@@ -163,9 +163,9 @@ Setting it as the cluster default means any workload that does not explicitly re
 
 ---
 
-## 9. S3-Backed Storage for Loki, Thanos, and Velero
+## 9. S3-Backed Storage for Loki, Thanos, Velero, and Tempo
 
-**Decision:** All three long-term storage concerns - logs (Loki), metrics (Thanos), and backups (Velero) - are backed by dedicated S3 buckets, provisioned in Terraform ([terraform/loki.tf](../terraform/loki.tf), [terraform/thanos.tf](../terraform/thanos.tf), [terraform/velero.tf](../terraform/velero.tf)) and referenced via cluster annotations.
+**Decision:** All four long-term storage concerns - logs (Loki), metrics (Thanos), backups (Velero), and traces (Tempo) - are backed by dedicated S3 buckets, provisioned in Terraform ([terraform/loki.tf](../terraform/loki.tf), [terraform/thanos.tf](../terraform/thanos.tf), [terraform/velero.tf](../terraform/velero.tf), [terraform/tempo.tf](../terraform/tempo.tf)) and referenced via cluster annotations.
 
 **Alternatives considered:**
 - EBS-only storage (no S3).
@@ -181,7 +181,7 @@ Setting it as the cluster default means any workload that does not explicitly re
 
 **Why separate buckets:**
 
-Separate buckets allow independent IAM policies scoped to each workload's IRSA role, independent lifecycle policies (Thanos needs tiered downsampling; Velero needs backup retention windows; Loki needs chunk expiry), and independent encryption/access audit trails. A single shared bucket would require prefix-based IAM policies that are harder to reason about and easier to misconfigure.
+Separate buckets allow independent IAM policies scoped to each workload's IRSA role, independent lifecycle policies (Thanos needs tiered downsampling; Velero needs backup retention windows; Loki needs chunk expiry; Tempo needs trace retention), and independent encryption/access audit trails. A single shared bucket would require prefix-based IAM policies that are harder to reason about and easier to misconfigure.
 
 Bucket names flow into Helm values via ArgoCD cluster secret annotations - the mechanism is covered in [decision 21](#21-terraformgitops-boundary-and-cluster-annotation-bridge).
 
@@ -358,7 +358,7 @@ ArgoCD applies all resources in a sync together by default. Without waves, a `Pr
 | 3 | Karpenter, Velero, Kyverno | Controllers before their CRD instances (NodePools, Schedules, ClusterPolicies) |
 | 4 | Karpenter NodePools, ClusterSecretStore | NodePools after Karpenter is running; ClusterSecretStore after ESO is ready |
 | 5 | All ExternalSecrets, Kyverno policies | Secrets before consumers; policies before workloads |
-| 6–8 | Loki, Prometheus, Grafana, workloads | Observability stack before application workloads |
+| 6–8 | Loki, Tempo, Prometheus, Grafana, workloads | Observability stack before application workloads |
 | 9–10 | Prometheus Adapter, AlertManager config, Thanos | Depends on Prometheus sidecar being live |
 
 The wave 2 → wave 6 gap for ALB Ingress resources is explained in [decision 16](#16-aws-load-balancer-controller-instead-of-nginx-ingress).
@@ -413,9 +413,43 @@ Conversely, Kubernetes config (Helm values, Ingress rules, PrometheusRules) chan
 
 **How the bridge works:**
 
-After `terraform apply`, the bootstrap script writes a cluster secret into ArgoCD with annotations containing Terraform outputs: `vpcId`, `clusterName`, `region`, `accountId`, `thanosBucketName`, `lokiBucketName`, `veleroBucketName`, `domainName`, and IRSA role ARNs. ApplicationSet `clusterDecisionResource` generators read these annotations and inject them as template variables into every child Application's Helm values.
+After `terraform apply`, the bootstrap script writes a cluster secret into ArgoCD with annotations containing Terraform outputs: `vpcId`, `clusterName`, `region`, `accountId`, `thanosBucketName`, `lokiBucketName`, `veleroBucketName`, `tempoBucketName`, `domainName`, and IRSA role ARNs. ApplicationSet `clusterDecisionResource` generators read these annotations and inject them as template variables into every child Application's Helm values.
 
 This means the GitOps manifests contain no hardcoded AWS account IDs, bucket names, or ARNs. The same manifests work across dev, staging, and production clusters by simply changing the cluster secret annotations - Terraform outputs flow automatically into all downstream Helm values without any manifest changes.
+
+---
+
+## 22. OTel Collector Two-Tier Topology (DaemonSet Agent + Deployment Gateway)
+
+**Decision:** Traces are not exported directly from application pods to Tempo. Instead, a two-tier OpenTelemetry Collector pipeline sits between them: a DaemonSet agent on every node receives spans from local pods, and a central Deployment gateway batches and forwards to Tempo ([gitops/tracing/otel-collector/](../gitops/tracing/otel-collector/)).
+
+**Alternatives considered:**
+- App → Tempo directly (OTLP HTTP).
+- App → single shared Collector Deployment (no DaemonSet).
+
+**Why not direct to Tempo:**
+
+Exporting directly couples every instrumented pod to Tempo's address, port, and availability. If Tempo is restarting, being upgraded, or temporarily unavailable, the application SDK's send buffer fills and spans are dropped unless retry/queue logic is explicitly configured in each application. Moving that concern to a collector process that runs independently of the application means the SDK can stay simple (fire-and-forget OTLP) and the collector handles retries, buffering, and backend routing.
+
+Directly connecting also prevents any future enrichment or fanout without touching application code. Routing to a second backend (e.g. a vendor APM tool alongside Tempo) requires a collector in the path; retrofitting one later is harder than having it there from the start.
+
+**Why a DaemonSet agent, not a single Deployment:**
+
+A single shared Collector Deployment would mean every pod on every node sends spans over the network to a single pod on a different node. Under load, this concentrates both network traffic and resource pressure on one target. It also introduces a single point of failure for span collection — if the collector pod restarts, spans from the entire cluster queue or drop until it recovers.
+
+The DaemonSet pattern keeps the first hop node-local: each pod sends spans to `$(status.hostIP):4318`, which is the agent running on the same physical node. No cross-node traffic is incurred for span ingestion. The agent is small (50m CPU / 128Mi memory) and runs a short-lived buffer with a 200ms batch window before forwarding gRPC to the gateway.
+
+**Why still have a central gateway:**
+
+The agent is intentionally thin — short buffers, fast batching, minimal processing. Centralising durable buffering, larger batches (1s / 1000 spans), and the Tempo export in a single gateway pod means:
+
+- The agent failure domain is scoped to one node. If it crashes, only pods on that node are affected until it restarts (typically seconds on a DaemonSet).
+- The gateway is the single point that speaks to Tempo. Tempo connection details, TLS config, or backend changes only need to be updated in one place.
+- Backpressure from Tempo (slow writes, storage pressure) is absorbed at the gateway, not propagated back to every node agent simultaneously.
+
+**Trade-off:**
+
+The two-tier setup adds a hop and two separate Helm releases to manage. For a single-node development cluster it is over-engineered. For a multi-node cluster where workload nodes turn over frequently (Karpenter), the DaemonSet's node-local placement and independent lifecycle justify the added complexity.
 
 ---
 

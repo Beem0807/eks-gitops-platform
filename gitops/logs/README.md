@@ -83,9 +83,11 @@ A ConfigMap with label `grafana_datasource: "1"` deployed into the `monitoring` 
 | Setting | Value |
 |---------|-------|
 | Name | `Loki` |
+| UID | `loki` |
 | Type | `loki` |
 | URL | `http://loki-gateway.logging.svc.cluster.local` |
 | Default | No (Prometheus remains the default) |
+| Derived field | Regex `"trace_id":"([a-f0-9]{32})"` — adds a **TraceID** link on matching JSON log lines that opens the span in Tempo |
 
 ---
 

@@ -1,14 +1,14 @@
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
-  name: grafana-loki-datasource
+  name: grafana-tempo-datasource
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "8"
   labels:
     app.kubernetes.io/part-of: eks-gitops-platform
     app.kubernetes.io/managed-by: argocd
-    app.kubernetes.io/component: logging
+    app.kubernetes.io/component: tracing
 spec:
   goTemplate: true
   goTemplateOptions: ["missingkey=error"]
@@ -19,11 +19,11 @@ spec:
             argocd.argoproj.io/secret-type: cluster
   template:
     metadata:
-      name: 'grafana-loki-datasource-{{.nameNormalized}}'
+      name: 'grafana-tempo-datasource-{{.nameNormalized}}'
       labels:
         app.kubernetes.io/part-of: eks-gitops-platform
         app.kubernetes.io/managed-by: argocd
-        app.kubernetes.io/component: logging
+        app.kubernetes.io/component: tracing
     spec:
       project: observability
       source:
@@ -31,33 +31,39 @@ spec:
         targetRevision: main
         path: charts/raw
         helm:
-          releaseName: grafana-loki-datasource
+          releaseName: grafana-tempo-datasource
           values: |
             resources:
               - apiVersion: v1
                 kind: ConfigMap
                 metadata:
-                  name: grafana-loki-datasource
+                  name: grafana-tempo-datasource
                   namespace: monitoring
                   labels:
                     grafana_datasource: "1"
                 data:
-                  loki-datasource.yaml: |
+                  tempo-datasource.yaml: |
                     apiVersion: 1
                     datasources:
-                      - name: Loki
-                        type: loki
-                        uid: loki
+                      - name: Tempo
+                        type: tempo
+                        uid: tempo
                         access: proxy
-                        url: http://loki-gateway.logging.svc.cluster.local
+                        url: http://tempo.tracing.svc.cluster.local:3100
                         isDefault: false
                         editable: true
                         jsonData:
-                          derivedFields:
-                            - datasourceUid: tempo
-                              matcherRegex: '"trace_id":"([a-f0-9]{32})"'
-                              name: TraceID
-                              url: "$${__value.raw}"
+                          nodeGraph:
+                            enabled: true
+                          tracesToLogsV2:
+                            datasourceUid: loki
+                            filterByTraceID: true
+                            filterBySpanID: false
+                            customQuery: false
+                          lokiSearch:
+                            datasourceUid: loki
+                          serviceMap:
+                            datasourceUid: thanos
       destination:
         server: '{{.server}}'
         namespace: monitoring

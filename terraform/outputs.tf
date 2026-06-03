@@ -38,3 +38,7 @@ output "loki_bucket_name" {
 output "velero_bucket_name" {
   value = aws_s3_bucket.velero.bucket
 }
+
+output "tempo_bucket_name" {
+  value = aws_s3_bucket.tempo.bucket
+}

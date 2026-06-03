@@ -134,6 +134,16 @@ serviceMonitor:
   # -- Extra labels added to the ServiceMonitor (used to target a specific Prometheus instance)
   labels: {}
 
+tracing:
+  # -- Enable OpenTelemetry tracing
+  enabled: false
+  # -- Direct OTLP HTTP endpoint (e.g. `http://otel-collector.tracing.svc.cluster.local:4318`). When empty, uses the node-local DaemonSet agent via `status.hostIP:agentPort`
+  endpoint: ""
+  # -- OTLP HTTP port on the node-local OTel Collector agent; used only when `endpoint` is empty
+  agentPort: 4318
+  # -- Service name reported in traces and correlated in Grafana Tempo
+  serviceName: simple-time-service
+
 # -- Extra annotations added to every pod
 podAnnotations: {}
 

@@ -16,7 +16,7 @@ Tear down the cluster when not in use. At rest, only S3, Route 53, and Secrets M
 | NAT Gateway | 1 gateway + minimal data transfer | ~$38 |
 | Application Load Balancers | 2 ALBs (ArgoCD + Grafana/app) | ~$43 |
 | EBS volumes | Prometheus 50 GB + Thanos 20 GB (`gp3`) | ~$7 |
-| S3 | Loki logs, Thanos blocks, Velero backups | ~$3–5 |
+| S3 | Loki logs, Thanos blocks, Velero backups, Tempo traces | ~$3–6 |
 | Secrets Manager | ~5 secrets | ~$2 |
 | Route 53 | 1 hosted zone | ~$1 |
 | **Total** | | **~$320–325/month** |

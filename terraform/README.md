@@ -26,10 +26,11 @@ This directory provisions the AWS infrastructure: a VPC and an EKS cluster. The 
 | Node security group | NLB NodePort rule optional (`enable_nlb_nodeport_rule`); Karpenter discovery tag when `enable_karpenter_discovery_tags=true` |
 | EKS add-ons | `coredns`, `kube-proxy`, `vpc-cni`, `eks-pod-identity-agent` managed by the EKS module |
 | Karpenter | IAM controller role + EKS Pod Identity association + node IAM role + instance profile + SQS interruption queue |
-| IRSA roles | Cluster Autoscaler, AWS Load Balancer Controller, ExternalDNS, External Secrets Operator, EBS CSI Driver controller, Thanos Prometheus sidecar, Thanos Compactor + StoreGateway, Loki, Velero |
+| IRSA roles | Cluster Autoscaler, AWS Load Balancer Controller, ExternalDNS, External Secrets Operator, EBS CSI Driver controller, Thanos Prometheus sidecar, Thanos Compactor + StoreGateway, Loki, Velero, Tempo |
 | Thanos S3 bucket | `<cluster-name>-thanos-metrics-<account-id>-<region>` - versioned, AES256-encrypted, public access blocked |
 | Loki S3 bucket | `<cluster-name>-loki-logs-<account-id>-<region>` - versioned, AES256-encrypted, public access blocked |
 | Velero S3 bucket | `<cluster-name>-velero-backups-<account-id>-<region>` - versioned, AES256-encrypted, public access blocked |
+| Tempo S3 bucket | `<cluster-name>-tempo-traces-<account-id>-<region>` - versioned, AES256-encrypted, public access blocked |
 | Secrets Manager | `argocd-admin`, `grafana-admin`, `alertmanager-webhook` secrets provisioned by Terraform |
 
 Modules used: [`terraform-aws-modules/eks/aws`](https://registry.terraform.io/modules/terraform-aws-modules/eks/aws/latest), [`terraform-aws-modules/vpc/aws`](https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws/latest), and [`terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts`](https://registry.terraform.io/modules/terraform-aws-modules/iam/aws/latest).
@@ -209,7 +210,7 @@ bash terraform/scripts/bootstrap.sh
 
 ### upgrade.sh - re-apply Terraform on a running cluster
 
-Use `upgrade.sh` when you need to apply Terraform changes or rotate secrets without reinstalling ArgoCD. It re-runs Terraform, refreshes the ArgoCD cluster secret with the latest outputs (including the Thanos bucket name), and force-annotates all three ExternalSecrets to trigger an immediate re-sync.
+Use `upgrade.sh` when you need to apply Terraform changes or rotate secrets without reinstalling ArgoCD. It re-runs Terraform, refreshes the ArgoCD cluster secret with the latest outputs (including Thanos/Loki/Velero/Tempo bucket names), and force-annotates all three ExternalSecrets to trigger an immediate re-sync.
 
 ```bash
 export TF_VAR_alertmanager_slack_webhook_url="https://hooks.slack.com/..."
@@ -223,7 +224,7 @@ bash terraform/scripts/upgrade.sh
 1. **Kubernetes resources** - deletes the root app, all ArgoCD Applications and ApplicationSets, Ingresses, LoadBalancer Services, Karpenter NodePools and NodeClaims, PersistentVolumes, and all platform namespaces (including `velero`)
 2. **AWS Load Balancers** - deletes leftover ALB/NLB/Classic ELBs tagged for the cluster
 3. **EBS volumes and snapshots** - deletes EBS volumes tagged `kubernetes.io/cluster/<cluster>=owned` (CSI Driver PVCs left behind by the `Retain` reclaim policy), then deletes EBS snapshots tagged for the cluster or carrying a `velero.io/backup` tag
-4. **S3 buckets** - empties all versioned S3 buckets in the same region whose name contains the cluster name (Thanos, Loki, Velero), draining all object versions and delete markers in batches so that Terraform can delete the buckets cleanly
+4. **S3 buckets** - empties all versioned S3 buckets in the same region whose name contains the cluster name (Thanos, Loki, Velero, Tempo), draining all object versions and delete markers in batches so that Terraform can delete the buckets cleanly
 5. **Terraform destroy** - removes all remaining AWS resources
 
 ---

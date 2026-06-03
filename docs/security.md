@@ -21,6 +21,7 @@ No workload uses a node-level IAM role for AWS API access. Every component that 
 | `prometheus` | `monitoring` | S3 read/write - Thanos bucket only (sidecar ship path) |
 | `thanos-compactor`, `thanos-storegateway` | `monitoring` | S3 read/write - Thanos bucket only |
 | `velero` | `velero` | S3 access on Velero bucket; `ec2:CreateSnapshot`, `ec2:DeleteSnapshot`, `ec2:Describe*` (AWS does not support resource ARNs for snapshot operations) |
+| `tempo` | `tracing` | S3 `GetObject`, `PutObject`, `DeleteObject` - Tempo bucket only |
 | `karpenter` | `karpenter` | Pod Identity Association - newer mechanism, no OIDC annotation required |
 
 Inline Checkov skips (`CKV_AWS_111`, `CKV_AWS_356`) document the two IAM policies where AWS does not support resource-level ARNs.
@@ -121,13 +122,13 @@ Policy Reporter (chart `2.24.1`) provides a web UI for browsing policy violation
 
 Three buckets store observability data and backups. All share the same baseline controls:
 
-| Control | Loki | Thanos | Velero |
-|---------|------|--------|--------|
-| Encryption | SSE-S3 (AES-256) | SSE-S3 (AES-256) | SSE-S3 (AES-256) |
-| Versioning | Enabled | Enabled | Enabled |
-| Public access block | All four flags enabled | All four flags enabled | All four flags enabled |
-| Access logging | Disabled | Disabled | Disabled |
-| Static credentials | None - IRSA only | None - IRSA only | None - IRSA only |
+| Control | Loki | Thanos | Velero | Tempo |
+|---------|------|--------|--------|-------|
+| Encryption | SSE-S3 (AES-256) | SSE-S3 (AES-256) | SSE-S3 (AES-256) | SSE-S3 (AES-256) |
+| Versioning | Enabled | Enabled | Enabled | Enabled |
+| Public access block | All four flags enabled | All four flags enabled | All four flags enabled | All four flags enabled |
+| Access logging | Disabled | Disabled | Disabled | Disabled |
+| Static credentials | None - IRSA only | None - IRSA only | None - IRSA only | None - IRSA only |
 
 SSE-KMS and access logging are intentionally deferred for a personal demo environment. Both are tracked in [Production Hardening](#production-hardening). The rationale for each skipped Checkov check is documented in `terraform/.checkov.yaml`.
 
