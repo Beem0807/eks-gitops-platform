@@ -1,6 +1,10 @@
 # EKS GitOps Platform
 
-A production-style cloud-native platform built on AWS EKS, demonstrating the full lifecycle from infrastructure provisioning to GitOps-managed deployments, observability, autoscaling, and centralized logging.
+A realistic EKS GitOps reference implementation - not a drop-in production platform, but a working end-to-end example of how one could be built.
+
+It covers the full lifecycle from infrastructure provisioning to GitOps-managed deployments, observability, autoscaling, backup/restore, policy enforcement, and centralized logging. Deliberate demo trade-offs are documented so the boundary between learning environment and production hardening is explicit.
+
+**Who this is for:** engineers who want a concrete, opinionated starting point for EKS + GitOps - something closer to real-world platform complexity than a tutorial, while still making the cost and operational shortcuts clear so you know exactly what to harden before taking it further.
 
 | Component | What it does |
 |-----------|-------------|
@@ -25,6 +29,22 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 | **Policy Reporter** | Web UI for Kyverno `PolicyReport` and `ClusterPolicyReport` objects - accessible via `kubectl port-forward` |
 
 > **Name mapping:** `SimpleTimeService` = source in `app/` = Helm release `simple-time-service` = manifest in `k8s/microservice.yaml`. All the same thing.
+
+---
+
+## Security
+
+> This platform implements IRSA for every workload, secrets via AWS Secrets Manager + External Secrets Operator, pod security contexts (non-root, read-only filesystem, all capabilities dropped), Kyverno admission policies, Trivy and Checkov scanning in CI, and ArgoCD AppProjects that restrict workload deployments to their own namespaces.
+
+See [docs/security.md](docs/security.md) for a full inventory of implemented controls and the production hardening roadmap.
+
+---
+
+## Cost
+
+> Running this stack continuously costs roughly **$310–330/month** at idle (on-demand, ap-south-1). Under active load expect **$400–500/month**. Tear down the cluster when not in use (`./scripts/cleanup.sh` from `terraform/`) - at rest only S3, Route 53, and Secrets Manager accrue charges (under $10/month).
+
+See [docs/cost.md](docs/cost.md) for a full per-component breakdown, cost-control tips, and safe teardown steps.
 
 ---
 
@@ -55,6 +75,8 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 | [gitops/security/README.md](gitops/security/README.md) | Kyverno policies, Policy Reporter UI, inspecting policy reports |
 | **Design** | |
 | [docs/design-decisions.md](docs/design-decisions.md) | Why each architectural choice was made - tool selection, configuration defaults, and demo trade-offs |
+| [docs/security.md](docs/security.md) | Implemented security controls and production hardening roadmap |
+| [docs/cost.md](docs/cost.md) | Monthly cost estimate, cost-control tips, and teardown guidance |
 | **Runbooks** | |
 | [docs/runbooks/README.md](docs/runbooks/README.md) | 13 operational runbooks - compute, networking, GitOps, observability, secrets, security, backup |
 
@@ -333,6 +355,8 @@ bash terraform/scripts/upgrade.sh
 │   └── k6-staged.js                            # k6 staged ramping-arrival-rate scenario
 ├── docs/
 │   ├── design-decisions.md                     # Architectural choices and trade-offs
+│   ├── security.md                             # Implemented security controls and production hardening roadmap
+│   ├── cost.md                                 # Monthly cost estimate, cost-control tips, and teardown guidance
 │   ├── runbooks/                               # 13 operational runbooks (incidents, DR, debugging)
 │   └── images/                                 # Screenshots referenced in sub-READMEs
 └── terraform/
