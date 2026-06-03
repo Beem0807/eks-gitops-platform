@@ -32,7 +32,7 @@ Grafana ◀── Tempo datasource (query port :3100)
               tracesToLogsV2 ──▶ Loki (uid: loki)
 ```
 
-The two-tier collector topology keeps inter-node traffic off the path for every span write. Pods send to `$(status.hostIP):4318` — always the local agent — so the only cross-node traffic is the agent-to-gateway leg, which is batched.
+The two-tier collector topology keeps inter-node traffic off the path for every span write. Pods send to `$(status.hostIP):4318` - always the local agent - so the only cross-node traffic is the agent-to-gateway leg, which is batched.
 
 Sync-wave ordering ensures the gateway is healthy before the agent tries to forward to it, and both are ready before the application workload starts emitting spans:
 
@@ -64,7 +64,7 @@ The `memory_limiter` runs before `batch` so backpressure propagates upstream bef
 
 ## OTel Collector Agent
 
-Runs as a **DaemonSet** in the `tracing` namespace — one pod per node. Tolerates all `NoSchedule` taints so it runs on both managed core nodes and Karpenter workload nodes.
+Runs as a **DaemonSet** in the `tracing` namespace - one pod per node. Tolerates all `NoSchedule` taints so it runs on both managed core nodes and Karpenter workload nodes.
 
 | Setting | Value |
 |---------|-------|
@@ -105,9 +105,9 @@ A ConfigMap with label `grafana_datasource: "1"` deployed into the `monitoring` 
 | UID | `tempo` |
 | URL | `http://tempo.tracing.svc.cluster.local:3100` |
 | Node graph | Enabled |
-| `tracesToLogsV2.datasourceUid` | `loki` — clicking a span opens the correlated Loki log stream |
-| `lokiSearch.datasourceUid` | `loki` — enables the **Logs** tab in the Tempo explorer |
-| `serviceMap.datasourceUid` | `thanos` — service graph overlay from Prometheus metrics |
+| `tracesToLogsV2.datasourceUid` | `loki` - clicking a span opens the correlated Loki log stream |
+| `lokiSearch.datasourceUid` | `loki` - enables the **Logs** tab in the Tempo explorer |
+| `serviceMap.datasourceUid` | `thanos` - service graph overlay from Prometheus metrics |
 
 The Loki datasource is given `uid: loki` in `gitops/logs/loki/grafana-loki-datasource.yaml` so the reference above resolves correctly.
 
@@ -118,7 +118,7 @@ Correlation is **bidirectional**:
 | Trace → Logs | `tracesToLogsV2` in Tempo datasource | Open a trace → **Logs** tab → Grafana runs `{job=~".+"} \| json \| trace_id = "<id>"` against Loki |
 | Log → Trace | `derivedFields` in Loki datasource | A log line with `"trace_id":"..."` gets a clickable **TraceID** link that opens the span in Tempo |
 
-`derivedFields` applies a regex to each log line. Non-JSON lines that don't match are displayed unchanged — no errors, no broken layout.
+`derivedFields` applies a regex to each log line. Non-JSON lines that don't match are displayed unchanged - no errors, no broken layout.
 
 ![Trace and log correlation](../../docs/images/trace-logs-correlation.png)
 

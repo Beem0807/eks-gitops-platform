@@ -225,6 +225,32 @@ bash terraform/scripts/upgrade.sh
 
 ---
 
+## Verified Platform Evidence
+
+Screenshots captured from a live deployment.
+
+### GitOps - ArgoCD all apps Synced / Healthy
+
+![ArgoCD UI](docs/images/ArgoCD%20UI.png)
+
+### Observability - Grafana dashboard (SimpleTimeService metrics)
+
+![Grafana Dashboard](docs/images/Grafana%20Dashboard.png)
+
+### Logging - Loki log lines in Grafana
+
+![Loki logs](docs/images/logs.png)
+
+### Tracing - Tempo trace with Loki log correlation
+
+![Trace and log correlation](docs/images/trace-logs-correlation.png)
+
+### Alerting - Slack alert received
+
+![Slack alert](docs/images/Alert.png)
+
+---
+
 ## Project structure
 
 ```

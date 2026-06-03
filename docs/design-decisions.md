@@ -435,13 +435,13 @@ Directly connecting also prevents any future enrichment or fanout without touchi
 
 **Why a DaemonSet agent, not a single Deployment:**
 
-A single shared Collector Deployment would mean every pod on every node sends spans over the network to a single pod on a different node. Under load, this concentrates both network traffic and resource pressure on one target. It also introduces a single point of failure for span collection — if the collector pod restarts, spans from the entire cluster queue or drop until it recovers.
+A single shared Collector Deployment would mean every pod on every node sends spans over the network to a single pod on a different node. Under load, this concentrates both network traffic and resource pressure on one target. It also introduces a single point of failure for span collection - if the collector pod restarts, spans from the entire cluster queue or drop until it recovers.
 
 The DaemonSet pattern keeps the first hop node-local: each pod sends spans to `$(status.hostIP):4318`, which is the agent running on the same physical node. No cross-node traffic is incurred for span ingestion. The agent is small (50m CPU / 128Mi memory) and runs a short-lived buffer with a 200ms batch window before forwarding gRPC to the gateway.
 
 **Why still have a central gateway:**
 
-The agent is intentionally thin — short buffers, fast batching, minimal processing. Centralising durable buffering, larger batches (1s / 1000 spans), and the Tempo export in a single gateway pod means:
+The agent is intentionally thin - short buffers, fast batching, minimal processing. Centralising durable buffering, larger batches (1s / 1000 spans), and the Tempo export in a single gateway pod means:
 
 - The agent failure domain is scoped to one node. If it crashes, only pods on that node are affected until it restarts (typically seconds on a DaemonSet).
 - The gateway is the single point that speaks to Tempo. Tempo connection details, TLS config, or backend changes only need to be updated in one place.
