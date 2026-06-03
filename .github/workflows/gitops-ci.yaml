@@ -38,7 +38,7 @@ jobs:
         run: |
           set -o pipefail
           helm lint charts/simple-time-service charts/namespaces charts/raw \
-            2>&1 | tee $GITHUB_WORKSPACE/helm-lint-report.txt
+            2>&1 | tee "$GITHUB_WORKSPACE/helm-lint-report.txt"
 
       - name: helm template | kubeconform
         id: helm_kubeconform
@@ -48,7 +48,7 @@ jobs:
             helm template charts/simple-time-service
             helm template charts/namespaces
           } | kubeconform -summary -strict -kubernetes-version 1.34.0 - \
-            2>&1 | tee $GITHUB_WORKSPACE/helm-kubeconform-report.txt
+            2>&1 | tee "$GITHUB_WORKSPACE/helm-kubeconform-report.txt"
 
       - name: Post results as PR comment
         if: failure() && github.event_name == 'pull_request'
@@ -108,7 +108,7 @@ jobs:
         run: |
           set -o pipefail
           kubeconform -summary -strict -kubernetes-version 1.34.0 k8s/ \
-            2>&1 | tee $GITHUB_WORKSPACE/kubeconform-k8s-report.txt
+            2>&1 | tee "$GITHUB_WORKSPACE/kubeconform-k8s-report.txt"
 
       - name: kubeconform (gitops/)
         id: kube_gitops
@@ -120,7 +120,7 @@ jobs:
             -ignore-missing-schemas \
             -kubernetes-version 1.34.0 \
             gitops/ \
-            2>&1 | tee $GITHUB_WORKSPACE/kubeconform-gitops-report.txt
+            2>&1 | tee "$GITHUB_WORKSPACE/kubeconform-gitops-report.txt"
 
       - name: Validate ApplicationSet Go template options
         id: appset_gotemplate
@@ -193,7 +193,7 @@ jobs:
         run: |
           set -o pipefail
           yamllint gitops/ k8s/ charts/ \
-            2>&1 | tee $GITHUB_WORKSPACE/yamllint-report.txt
+            2>&1 | tee "$GITHUB_WORKSPACE/yamllint-report.txt"
 
       - name: Post results as PR comment
         if: failure() && github.event_name == 'pull_request'

@@ -23,10 +23,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install codeowners-validator
-        run: |
-          curl -sL https://github.com/mszostok/codeowners-validator/releases/download/v0.7.4/codeowners-validator-linux-amd64.tar.gz \
-            | tar xz codeowners-validator
-          sudo mv codeowners-validator /usr/local/bin/
+        run: go install github.com/mszostok/codeowners-validator@v0.7.4
 
       - name: Validate CODEOWNERS
         id: codeowners
@@ -34,10 +31,11 @@ jobs:
           GITHUB_ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OWNER: ${{ github.repository_owner }}
           REPOSITORY: ${{ github.event.repository.name }}
+          CHECKS: "syntax,duppatterns,owners"
         run: |
           set -o pipefail
-          codeowners-validator --checks=syntax,duppatterns,owners \
-            2>&1 | tee $GITHUB_WORKSPACE/codeowners-report.txt
+          "$(go env GOPATH)/bin/codeowners-validator" \
+            2>&1 | tee "$GITHUB_WORKSPACE/codeowners-report.txt"
 
       - name: Post results as PR comment
         if: failure() && github.event_name == 'pull_request'

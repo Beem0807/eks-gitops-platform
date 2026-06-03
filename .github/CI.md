@@ -205,6 +205,6 @@ The `synchronize` trigger ensures branch protection always sees a current status
 
 To enforce that all checks must pass before a PR can be merged, configure branch protection on `main`:
 
-**Settings → Branches → Add rule → Require status checks to pass → add `Build and Trivy Scan`, `Validate`, `Checkov Scan`, `Helm Lint`, `Validate Manifests`, `YAML Lint`, `Lint Workflows`, `Validate CODEOWNERS`, `Validate PR Title`**
+**Settings → Branches → Add rule → Require status checks to pass → add `Build and Trivy Scan`, `Validate Terraform`, `Checkov Scan`, `Helm Lint`, `Validate Manifests`, `YAML Lint`, `Lint Workflows`, `Validate CODEOWNERS`, `Validate PR Title`**
 
 > `validate` appears in both `terraform-ci` and `codeowners-check`. GitHub treats status checks by job name - both must pass when both are triggered.
