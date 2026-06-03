@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -uo pipefail
 
 ROOT_DIR="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
 TF_DIR="${ROOT_DIR}/terraform"
@@ -440,6 +440,90 @@ except Exception:
   fi
 }
 
+_force_remove_namespaced_finalizers() {
+  local resource_type="$1"
+
+  kubectl get "$resource_type" --all-namespaces \
+    -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null \
+    | while read -r ns name; do
+        [[ -z "${ns:-}" || -z "${name:-}" ]] && continue
+        echo "  Removing finalizers from ${resource_type}/${name} in namespace ${ns}"
+        kubectl patch "$resource_type" "$name" \
+          -n "$ns" \
+          --type=merge \
+          -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true
+      done
+}
+
+# Best-effort helper: force-delete a namespaced resource type.
+_force_delete_namespaced_resources() {
+  local resource_type="$1"
+
+  kubectl get "$resource_type" --all-namespaces \
+    -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null \
+    | while read -r ns name; do
+        [[ -z "${ns:-}" || -z "${name:-}" ]] && continue
+        echo "  Force deleting ${resource_type}/${name} in namespace ${ns}"
+        kubectl delete "$resource_type" "$name" \
+          -n "$ns" \
+          --ignore-not-found=true \
+          --grace-period=0 \
+          --force \
+          --wait=false >/dev/null 2>&1 || true
+      done
+}
+
+# Best-effort helper: remove Kubernetes finalizers from a cluster-scoped resource type.
+_force_remove_cluster_finalizers() {
+  local resource_type="$1"
+
+  kubectl get "$resource_type" \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null \
+    | while read -r name; do
+        [[ -z "${name:-}" ]] && continue
+        echo "  Removing finalizers from ${resource_type}/${name}"
+        kubectl patch "$resource_type" "$name" \
+          --type=merge \
+          -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true
+      done
+}
+
+# Best-effort helper: force-delete a cluster-scoped resource type.
+_force_delete_cluster_resources() {
+  local resource_type="$1"
+
+  kubectl get "$resource_type" \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null \
+    | while read -r name; do
+        [[ -z "${name:-}" ]] && continue
+        echo "  Force deleting ${resource_type}/${name}"
+        kubectl delete "$resource_type" "$name" \
+          --ignore-not-found=true \
+          --grace-period=0 \
+          --force \
+          --wait=false >/dev/null 2>&1 || true
+      done
+}
+
+# Best-effort helper: remove namespace finalizers.
+_force_remove_namespace_finalizers() {
+  kubectl get ns \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null \
+    | while read -r ns; do
+        [[ -z "${ns:-}" ]] && continue
+        case "$ns" in
+          kube-system|kube-public|kube-node-lease|default)
+            continue
+            ;;
+        esac
+
+        echo "  Removing finalizers from namespace/${ns}"
+        kubectl patch namespace "$ns" \
+          --type=merge \
+          -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true
+      done
+}
+
 cleanup_kubernetes_resources() {
   if [[ -z "$CLUSTER_NAME" || -z "$AWS_REGION" ]]; then
     echo "Terraform outputs cluster_name/region not available. Skipping Kubernetes cleanup."
@@ -457,140 +541,202 @@ cleanup_kubernetes_resources() {
     return 0
   fi
 
-  echo "Deleting Argo CD root app if present..."
-  kubectl delete app root-app \
+  echo "NUKE MODE: stopping GitOps/controllers..."
+
+  kubectl scale statefulset argocd-application-controller \
+    -n "$ARGOCD_NS" \
+    --replicas=0 >/dev/null 2>&1 || true
+
+  kubectl scale deployment argocd-applicationset-controller \
+    -n "$ARGOCD_NS" \
+    --replicas=0 >/dev/null 2>&1 || true
+
+  kubectl scale deployment argocd-repo-server \
+    -n "$ARGOCD_NS" \
+    --replicas=0 >/dev/null 2>&1 || true
+
+  kubectl scale deployment argocd-server \
+    -n "$ARGOCD_NS" \
+    --replicas=0 >/dev/null 2>&1 || true
+
+  kubectl scale deployment argocd-dex-server \
+    -n "$ARGOCD_NS" \
+    --replicas=0 >/dev/null 2>&1 || true
+
+  kubectl scale deployment argocd-redis \
+    -n "$ARGOCD_NS" \
+    --replicas=0 >/dev/null 2>&1 || true
+
+  echo "Deleting Argo CD controller workloads and pods..."
+  kubectl delete statefulset argocd-application-controller \
     -n "$ARGOCD_NS" \
     --ignore-not-found=true \
-    --wait=false || true
+    --grace-period=0 \
+    --force \
+    --wait=false >/dev/null 2>&1 || true
 
-  echo "Deleting generated Argo CD Applications..."
-  kubectl delete applications.argoproj.io \
-    --all \
+  kubectl delete deployment \
     -n "$ARGOCD_NS" \
+    -l app.kubernetes.io/part-of=argocd \
     --ignore-not-found=true \
-    --wait=false || true
+    --grace-period=0 \
+    --force \
+    --wait=false >/dev/null 2>&1 || true
 
-  echo "Deleting generated ApplicationSets..."
-  kubectl delete applicationsets.argoproj.io \
-    --all \
+  kubectl delete pod \
     -n "$ARGOCD_NS" \
+    -l app.kubernetes.io/part-of=argocd \
     --ignore-not-found=true \
-    --wait=false || true
+    --grace-period=0 \
+    --force \
+    --wait=false >/dev/null 2>&1 || true
 
-  echo "Deleting Kubernetes Ingresses before namespaces..."
-  kubectl delete ingress \
-    --all \
-    --all-namespaces \
+  # Also stop common reconcilers that may keep cloud resources alive or recreate resources.
+  echo "Stopping common platform controllers..."
+  kubectl delete deployment \
+    -n kube-system \
+    aws-load-balancer-controller \
+    external-dns \
     --ignore-not-found=true \
-    --wait=false || true
+    --grace-period=0 \
+    --force \
+    --wait=false >/dev/null 2>&1 || true
 
-  echo "Deleting Kubernetes LoadBalancer Services before namespaces..."
-  kubectl delete service \
-    --all-namespaces \
+  kubectl delete deployment \
+    -n karpenter \
+    karpenter \
+    --ignore-not-found=true \
+    --grace-period=0 \
+    --force \
+    --wait=false >/dev/null 2>&1 || true
+
+  kubectl delete deployment \
+    -n external-secrets \
+    external-secrets \
+    external-secrets-cert-controller \
+    external-secrets-webhook \
+    --ignore-not-found=true \
+    --grace-period=0 \
+    --force \
+    --wait=false >/dev/null 2>&1 || true
+
+  echo "Removing finalizers from Argo CD custom resources..."
+  _force_remove_namespaced_finalizers applications.argoproj.io
+  _force_remove_namespaced_finalizers applicationsets.argoproj.io
+  _force_remove_namespaced_finalizers appprojects.argoproj.io
+
+  echo "Force deleting Argo CD custom resources..."
+  _force_delete_namespaced_resources applicationsets.argoproj.io
+  _force_delete_namespaced_resources applications.argoproj.io
+  _force_delete_namespaced_resources appprojects.argoproj.io
+
+  echo "Force deleting ALL Kubernetes Ingresses..."
+  _force_remove_namespaced_finalizers ingress
+  _force_delete_namespaced_resources ingress
+
+  echo "Force deleting ALL Kubernetes LoadBalancer Services..."
+  kubectl get service --all-namespaces \
     --field-selector spec.type=LoadBalancer \
-    --ignore-not-found=true \
-    --wait=false || true
+    -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null \
+    | while read -r ns name; do
+        [[ -z "${ns:-}" || -z "${name:-}" ]] && continue
+        echo "  Force deleting service/${name} in namespace ${ns}"
+        kubectl patch service "$name" \
+          -n "$ns" \
+          --type=merge \
+          -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true
+        kubectl delete service "$name" \
+          -n "$ns" \
+          --ignore-not-found=true \
+          --grace-period=0 \
+          --force \
+          --wait=false >/dev/null 2>&1 || true
+      done
 
-  echo "Waiting for Kubernetes LoadBalancer Services and Ingresses to disappear..."
-  for i in $(seq 1 20); do
-    LB_SERVICE_COUNT="$(kubectl get service --all-namespaces \
+  echo "Verifying Ingress and LoadBalancer Service removal..."
+  for i in $(seq 1 8); do
+    local lb_service_count
+    local ingress_count
+
+    lb_service_count="$(kubectl get service --all-namespaces \
       --field-selector spec.type=LoadBalancer \
       --no-headers 2>/dev/null | wc -l | tr -d ' ')"
 
-    INGRESS_COUNT="$(kubectl get ingress --all-namespaces \
+    ingress_count="$(kubectl get ingress --all-namespaces \
       --no-headers 2>/dev/null | wc -l | tr -d ' ')"
 
-    if [[ "$LB_SERVICE_COUNT" == "0" && "$INGRESS_COUNT" == "0" ]]; then
-      echo "Kubernetes LoadBalancer Services and Ingresses deleted."
+    if [[ "$lb_service_count" == "0" && "$ingress_count" == "0" ]]; then
+      echo "Kubernetes Ingresses and LoadBalancer Services removed from API."
       break
     fi
 
-    echo "LoadBalancer Services: $LB_SERVICE_COUNT, Ingresses: $INGRESS_COUNT. Waiting..."
-    sleep 15
+    echo "  Still present - LoadBalancer Services: $lb_service_count, Ingresses: $ingress_count ($i/8)"
+    _force_remove_namespaced_finalizers ingress
+    _force_delete_namespaced_resources ingress
+    sleep 5
   done
 
-  echo "Deleting Karpenter NodePools while controller is still running..."
-  kubectl delete nodepool.karpenter.sh \
-    --all \
-    --ignore-not-found=true \
-    --wait=false || true
+  echo "Force deleting Karpenter resources..."
+  _force_remove_cluster_finalizers nodepool.karpenter.sh
+  _force_remove_cluster_finalizers nodeclaim.karpenter.sh
+  _force_remove_cluster_finalizers ec2nodeclass.karpenter.k8s.aws
+  _force_delete_cluster_resources nodeclaim.karpenter.sh
+  _force_delete_cluster_resources nodepool.karpenter.sh
+  _force_delete_cluster_resources ec2nodeclass.karpenter.k8s.aws
 
-  echo "Deleting Karpenter NodeClaims while controller is still running..."
-  kubectl delete nodeclaim.karpenter.sh \
-    --all \
-    --ignore-not-found=true \
-    --wait=false || true
+  echo "Force terminating Karpenter EC2 instances at AWS level..."
+  _force_terminate_karpenter_instances
 
-  echo "Waiting for Karpenter-managed nodes to terminate..."
-  KARPENTER_NODE_COUNT="0"
-  for i in $(seq 1 24); do
-    KARPENTER_NODE_COUNT="$(kubectl get nodes -l karpenter.sh/nodepool \
-      --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+  echo "Force deleting PersistentVolumeClaims and PersistentVolumes..."
+  _force_remove_namespaced_finalizers pvc
+  _force_delete_namespaced_resources pvc
+  _force_remove_cluster_finalizers pv
+  _force_delete_cluster_resources pv
 
-    if [[ "$KARPENTER_NODE_COUNT" == "0" ]]; then
-      echo "Karpenter-managed nodes terminated."
-      break
-    fi
+  echo "Force deleting platform namespaces..."
+  kubectl get ns \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null \
+    | while read -r ns; do
+        [[ -z "${ns:-}" ]] && continue
+        case "$ns" in
+          kube-system|kube-public|kube-node-lease|default)
+            continue
+            ;;
+        esac
 
-    echo "Karpenter-managed nodes still present: $KARPENTER_NODE_COUNT. Waiting..."
-    sleep 15
-  done
+        echo "  Force deleting namespace/${ns}"
+        kubectl patch namespace "$ns" \
+          --type=merge \
+          -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true
+        kubectl delete namespace "$ns" \
+          --ignore-not-found=true \
+          --grace-period=0 \
+          --force \
+          --wait=false >/dev/null 2>&1 || true
+      done
 
-  if [[ "$KARPENTER_NODE_COUNT" != "0" ]]; then
-    echo "WARNING: $KARPENTER_NODE_COUNT Karpenter node(s) did not drain in time. Falling back to AWS EC2 force-termination..."
-    _force_terminate_karpenter_instances
-  fi
+  echo "Removing namespace finalizers again..."
+  _force_remove_namespace_finalizers
 
-  echo "Current Karpenter-managed nodes, if any:"
-  kubectl get nodes -l karpenter.sh/nodepool || true
+  echo "Force deleting known CRDs..."
+  kubectl delete crd applications.argoproj.io --ignore-not-found=true --grace-period=0 --force --wait=false >/dev/null 2>&1 || true
+  kubectl delete crd applicationsets.argoproj.io --ignore-not-found=true --grace-period=0 --force --wait=false >/dev/null 2>&1 || true
+  kubectl delete crd appprojects.argoproj.io --ignore-not-found=true --grace-period=0 --force --wait=false >/dev/null 2>&1 || true
 
-  echo "Deleting cluster-scoped GitOps resources..."
-  kubectl delete clustersecretstore.external-secrets.io aws-secrets-manager \
-    --ignore-not-found=true \
-    --wait=false || true
+  kubectl delete crd externalsecrets.external-secrets.io --ignore-not-found=true --grace-period=0 --force --wait=false >/dev/null 2>&1 || true
+  kubectl delete crd secretstores.external-secrets.io --ignore-not-found=true --grace-period=0 --force --wait=false >/dev/null 2>&1 || true
+  kubectl delete crd clustersecretstores.external-secrets.io --ignore-not-found=true --grace-period=0 --force --wait=false >/dev/null 2>&1 || true
+  kubectl delete crd clusterexternalsecrets.external-secrets.io --ignore-not-found=true --grace-period=0 --force --wait=false >/dev/null 2>&1 || true
 
-  kubectl delete ec2nodeclass.karpenter.k8s.aws \
-    --all \
-    --ignore-not-found=true \
-    --wait=false || true
+  kubectl delete crd nodepools.karpenter.sh --ignore-not-found=true --grace-period=0 --force --wait=false >/dev/null 2>&1 || true
+  kubectl delete crd nodeclaims.karpenter.sh --ignore-not-found=true --grace-period=0 --force --wait=false >/dev/null 2>&1 || true
+  kubectl delete crd ec2nodeclasses.karpenter.k8s.aws --ignore-not-found=true --grace-period=0 --force --wait=false >/dev/null 2>&1 || true
 
-  echo "Deleting PersistentVolumes (Retain policy prevents automatic deletion)..."
-  kubectl delete pv \
-    --all \
-    --ignore-not-found=true \
-    --wait=false || true
-
-  echo "Deleting platform-managed namespaces..."
-  kubectl delete namespace \
-    -l app.kubernetes.io/part-of=eks-gitops-platform \
-    --ignore-not-found=true \
-    --wait=false || true
-
-  echo "Deleting Argo CD namespace..."
-  kubectl delete namespace "$ARGOCD_NS" \
-    --ignore-not-found=true \
-    --wait=false || true
-
-  echo "Deleting Argo CD CRDs..."
-  kubectl delete crd applications.argoproj.io --ignore-not-found=true --wait=false || true
-  kubectl delete crd applicationsets.argoproj.io --ignore-not-found=true --wait=false || true
-  kubectl delete crd appprojects.argoproj.io --ignore-not-found=true --wait=false || true
-
-  echo "Deleting External Secrets CRDs..."
-  kubectl delete crd externalsecrets.external-secrets.io --ignore-not-found=true --wait=false || true
-  kubectl delete crd secretstores.external-secrets.io --ignore-not-found=true --wait=false || true
-  kubectl delete crd clustersecretstores.external-secrets.io --ignore-not-found=true --wait=false || true
-  kubectl delete crd clusterexternalsecrets.external-secrets.io --ignore-not-found=true --wait=false || true
-
-  echo "Deleting Karpenter CRDs..."
-  kubectl delete crd nodepools.karpenter.sh --ignore-not-found=true --wait=false || true
-  kubectl delete crd nodeclaims.karpenter.sh --ignore-not-found=true --wait=false || true
-  kubectl delete crd ec2nodeclasses.karpenter.k8s.aws --ignore-not-found=true --wait=false || true
-
-  echo "Deleting Kyverno CRDs..."
   kubectl get crd -o name 2>/dev/null \
     | grep -E '\.(kyverno\.io|wgpolicyk8s\.io)$' \
-    | xargs -r kubectl delete --ignore-not-found=true --wait=false || true
+    | xargs -r kubectl delete --ignore-not-found=true --grace-period=0 --force --wait=false >/dev/null 2>&1 || true
+
+  echo "Kubernetes nuke pass completed. AWS cleanup will remove leftover ALBs/NLBs/SGs/EBS/S3."
 }
 
 cleanup_leftover_aws_load_balancers() {
@@ -885,17 +1031,14 @@ print(next((t['Value'] for t in tags if 'velero' in t['Key'].lower()), ''))
 
 cleanup_kubernetes_resources
 cleanup_karpenter_ec2_instances
+
+cleanup_s3_buckets
+
+terraform destroy -auto-approve -input=false
+
 cleanup_leftover_aws_load_balancers
 cleanup_leftover_aws_security_groups
 cleanup_ebs_volumes_and_snapshots
-cleanup_s3_buckets
-
-echo "Running Terraform destroy..."
-
-terraform destroy \
-  -auto-approve \
-  -input=false
-
 cleanup_leftover_vpc
 
 verify_cleanup
