@@ -1,0 +1,16 @@
+# Default owner for everything not matched below
+*                           @Beem0807
+
+# CI workflows - any change to pipelines requires review
+.github/                    @Beem0807
+
+# Infrastructure - Terraform changes require review
+terraform/                  @Beem0807
+
+# Application - image and source code changes require review
+app/                        @Beem0807
+
+# GitOps - manifest changes require review before ArgoCD picks them up
+gitops/                     @Beem0807
+k8s/                        @Beem0807
+charts/                     @Beem0807

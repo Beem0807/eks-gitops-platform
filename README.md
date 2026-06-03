@@ -32,7 +32,8 @@ A production-style cloud-native platform built on AWS EKS, demonstrating the ful
 
 | | |
 |-|-|
-| [.github/CI.md](.github/CI.md) | CI workflows - triggers, steps, required secrets, branch protection |
+| [.github/CI.md](.github/CI.md) | CI workflows - triggers, steps, required secrets |
+| [.github/branch-protection.md](.github/branch-protection.md) | Branch protection rules and required status checks |
 | [app/README.md](app/README.md) | Docker image, CI pipeline, endpoints, container security |
 | [terraform/README.md](terraform/README.md) | Infrastructure provisioning, bootstrap module, remote state |
 | [charts/namespaces/README.md](charts/namespaces/README.md) | Namespace management chart - creates namespaces and ResourceQuotas from a values list |
@@ -202,11 +203,16 @@ bash terraform/scripts/upgrade.sh
 ```
 .
 ├── .github/
-│   ├── CI.md                                   # CI workflows - triggers, steps, secrets, branch protection
+│   ├── CI.md                                   # CI workflows - triggers, steps, secrets
+│   ├── CODEOWNERS                              # Automatic review assignment by path
+│   ├── branch-protection.md                    # Branch protection rules and required status checks
 │   └── workflows/
 │       ├── app-image.yaml                      # CI - build, scan, and push Docker image to Docker Hub
 │       ├── terraform-ci.yaml                   # CI - format, validate, lint, and security scan Terraform
-│       └── gitops-ci.yaml                      # CI - helm lint, kubeconform, and yamllint for GitOps manifests
+│       ├── gitops-ci.yaml                      # CI - helm lint, kubeconform, and yamllint for GitOps manifests
+│       ├── actions-check.yaml                  # CI - lint all GitHub Actions workflow files with actionlint
+│       ├── codeowners-check.yaml               # CI - validate CODEOWNERS syntax and owner existence
+│       └── pr-title-check.yaml                 # CI - enforce Conventional Commits format on PR titles
 ├── .yamllint.yaml                              # yamllint config - rules for gitops-ci YAML linting
 ├── compose.yaml                                # Docker Compose for local development
 ├── app/

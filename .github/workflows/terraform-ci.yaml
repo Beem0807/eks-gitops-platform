@@ -11,7 +11,7 @@ on:
 
 jobs:
   validate:
-    name: Validate
+    name: Validate Terraform
     runs-on: ubuntu-latest
 
     permissions:
@@ -60,7 +60,7 @@ jobs:
 
       - name: TFLint
         id: tflint
-        run: tflint --recursive 2>&1 | tee $GITHUB_WORKSPACE/tflint-report.txt; exit ${PIPESTATUS[0]}
+        run: tflint --recursive 2>&1 | tee "$GITHUB_WORKSPACE/tflint-report.txt"; exit "${PIPESTATUS[0]}"
         working-directory: terraform
 
       - name: Post TFLint results as PR comment
@@ -96,7 +96,7 @@ jobs:
             }
 
   security:
-    name: Security scan
+    name: Checkov Scan
     runs-on: ubuntu-latest
 
     permissions:
