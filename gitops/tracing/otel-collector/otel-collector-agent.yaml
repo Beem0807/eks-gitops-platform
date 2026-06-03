@@ -35,6 +35,9 @@ spec:
           values: |
             fullnameOverride: otel-agent
 
+            image:
+              repository: otel/opentelemetry-collector-contrib
+
             mode: daemonset
 
             config:

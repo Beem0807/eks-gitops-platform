@@ -35,6 +35,9 @@ spec:
           values: |
             fullnameOverride: otel-gateway
 
+            image:
+              repository: otel/opentelemetry-collector-contrib
+
             mode: deployment
             replicaCount: 1
 
