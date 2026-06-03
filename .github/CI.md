@@ -1,6 +1,6 @@
 # CI Workflows
 
-Three workflows gate changes to this repository. All are triggered by pull requests to `main`, scoped to their relevant paths.
+Six workflows gate changes to this repository. All are triggered by pull requests to `main`, scoped to their relevant paths.
 
 ---
 
@@ -77,7 +77,7 @@ Checkov results are posted as a PR comment on failure and uploaded to the GitHub
 
 ---
 
-## `gitops-ci.yaml` — GitOps / Kubernetes CI
+## `gitops-ci.yaml` - GitOps / Kubernetes CI
 
 **Triggers:** pull requests to `main` with changes under `gitops/**`, `k8s/**`, or `charts/**`.
 
@@ -90,19 +90,19 @@ Protects the GitOps repo from broken YAML, invalid manifests, and broken Helm te
 | `helm lint` | Chart structure and values for all three charts (`simple-time-service`, `namespaces`, `raw`) |
 | `helm template \| kubeconform` | Rendered manifests from `simple-time-service` and `namespaces` are valid Kubernetes resources against the 1.34 schema |
 
-`charts/raw` is only linted, not templated — it is a passthrough chart that requires caller-supplied `Values.resources` to produce output.
+`charts/raw` is only linted, not templated - it is a passthrough chart that requires caller-supplied `Values.resources` to produce output.
 
 ### Job: `manifests`
 
 | Step | What it checks |
 |------|----------------|
 | `kubeconform` on `k8s/` | Strict schema validation against Kubernetes 1.34 |
-| `kubeconform` on `gitops/` | Schema validation with `--ignore-missing-schemas` — standard K8s resources are validated; ArgoCD and Prometheus CRDs are skipped |
+| `kubeconform` on `gitops/` | Schema validation with `--ignore-missing-schemas` - standard K8s resources are validated; ArgoCD and Prometheus CRDs are skipped |
 | ApplicationSet Go template options | Every `kind: ApplicationSet` file must have `goTemplate: true` and `goTemplateOptions: ["missingkey=error"]` |
 
 **Why the ApplicationSet check matters:**
-- `goTemplate: true` — enables Go template syntax in the ApplicationSet generator; without it, template expressions are rendered literally
-- `missingkey=error` — makes ArgoCD fail at sync time if a template variable is undefined, instead of silently rendering an empty string which can produce broken manifests that pass validation but misbehave at runtime
+- `goTemplate: true` - enables Go template syntax in the ApplicationSet generator; without it, template expressions are rendered literally
+- `missingkey=error` - makes ArgoCD fail at sync time if a template variable is undefined, instead of silently rendering an empty string which can produce broken manifests that pass validation but misbehave at runtime
 
 ### Job: `yaml-lint`
 
@@ -128,8 +128,83 @@ All three jobs post results as a PR comment on failure.
 
 ---
 
+## `actions-check.yaml` - Actions Check
+
+**Triggers:** pull requests to `main` with changes under `.github/workflows/**`.
+
+### Job: `actionlint`
+
+Runs [`actionlint`](https://github.com/rhysd/actionlint) across all workflow files in `.github/workflows/`. Catches issues before they reach GitHub Actions runners:
+
+- Invalid expression syntax (`${{ }}`)
+- References to undefined contexts or outputs
+- Type mismatches (e.g. passing a string where a boolean is expected)
+- Invalid `if:` conditionals
+- Incorrect `needs:` job references
+- Missing required inputs on `workflow_call`
+
+Results are posted as a PR comment on failure.
+
+---
+
+## `codeowners-check.yaml` - CODEOWNERS Check
+
+**Triggers:** pull requests to `main` with changes to `.github/CODEOWNERS`.
+
+### Job: `validate`
+
+Runs [`codeowners-validator`](https://github.com/mszostok/codeowners-validator) against `.github/CODEOWNERS` with three checks:
+
+| Check | What it validates |
+|-------|-------------------|
+| `syntax` | File follows the valid CODEOWNERS pattern format |
+| `duppatterns` | No two entries match the same glob pattern |
+| `owners` | All referenced owners (`@user`, `@org/team`, `email`) exist on GitHub |
+
+The `owners` check uses `GITHUB_TOKEN` to call the GitHub API - no additional secrets required.
+
+Results are posted as a PR comment on failure.
+
+---
+
+## `pr-title-check.yaml` - PR Title Check
+
+**Triggers:** all pull requests to `main` (no path filter) on `opened`, `edited`, `synchronize`, and `reopened` events.
+
+### Job: `validate`
+
+Validates that the PR title follows [Conventional Commits](https://www.conventionalcommits.org/) format using [`amannn/action-semantic-pull-request`](https://github.com/amannn/action-semantic-pull-request).
+
+**Format:** `<type>[optional scope]: <description>`
+
+**Valid types:**
+
+| Type | Use for |
+|------|---------|
+| `feat` | New feature or capability |
+| `fix` | Bug fix |
+| `chore` | Maintenance, dependency updates |
+| `docs` | Documentation only |
+| `ci` | CI/CD pipeline changes |
+| `refactor` | Code restructuring without behaviour change |
+| `test` | Adding or updating tests |
+| `perf` | Performance improvements |
+| `style` | Formatting, whitespace (no logic change) |
+| `revert` | Reverting a previous commit |
+
+**Examples:**
+- `feat: add velero backup schedule`
+- `fix(app): correct health check endpoint`
+- `ci: add pr title check workflow`
+
+The `synchronize` trigger ensures branch protection always sees a current status on the latest commit, even when only the branch is updated without editing the title. On failure, a PR comment is posted with the current title, the expected format, and examples. The comment is updated in place if the title is edited and still fails.
+
+---
+
 ## Branch protection
 
 To enforce that all checks must pass before a PR can be merged, configure branch protection on `main`:
 
-**Settings → Branches → Add rule → Require status checks to pass → add `build-and-scan`, `validate`, `security`, `helm`, `manifests`, `yaml-lint`**
+**Settings → Branches → Add rule → Require status checks to pass → add `build-and-scan`, `validate`, `security`, `helm`, `manifests`, `yaml-lint`, `actionlint`, `Validate PR title`**
+
+> `validate` appears in both `terraform-ci` and `codeowners-check`. GitHub treats status checks by job name - both must pass when both are triggered.
