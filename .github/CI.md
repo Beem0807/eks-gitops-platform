@@ -159,9 +159,8 @@ Runs [`codeowners-validator`](https://github.com/mszostok/codeowners-validator) 
 |-------|-------------------|
 | `syntax` | File follows the valid CODEOWNERS pattern format |
 | `duppatterns` | No two entries match the same glob pattern |
-| `owners` | All referenced owners (`@user`, `@org/team`, `email`) exist on GitHub |
 
-The `owners` check uses `GITHUB_TOKEN` to call the GitHub API - no additional secrets required.
+The `owners` check is excluded - it requires `read:org` OAuth scope which the default `GITHUB_TOKEN` does not have.
 
 Results are posted as a PR comment on failure.
 
