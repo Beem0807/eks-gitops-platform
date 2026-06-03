@@ -81,7 +81,20 @@ spec:
                 cpu: 200m
                 memory: 256Mi
 
+            podSecurityContext:
+              runAsNonRoot: true
+              runAsUser: 10001
+              runAsGroup: 10001
+
+            securityContext:
+              runAsNonRoot: true
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: [ALL]
+
             # Run on every node - core nodes and Karpenter workload nodes
+            nodeSelector: {}
+            affinity: {}
             tolerations:
               - operator: Exists
                 effect: NoSchedule
