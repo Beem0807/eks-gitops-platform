@@ -13,7 +13,7 @@ on:
 
 jobs:
   helm:
-    name: Helm
+    name: Helm Lint
     runs-on: ubuntu-latest
 
     permissions:
@@ -86,7 +86,7 @@ jobs:
             }
 
   manifests:
-    name: Manifests
+    name: Validate Manifests
     runs-on: ubuntu-latest
 
     permissions:
@@ -174,7 +174,7 @@ jobs:
             }
 
   yaml-lint:
-    name: YAML lint
+    name: YAML Lint
     runs-on: ubuntu-latest
 
     permissions:

@@ -1,4 +1,4 @@
-name: Build and Push app image
+name: App Image CI
 
 on:
   push:
@@ -17,6 +17,7 @@ on:
 
 jobs:
   build-and-scan:
+    name: Build and Trivy Scan
     runs-on: ubuntu-latest
 
     permissions:

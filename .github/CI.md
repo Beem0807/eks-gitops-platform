@@ -128,11 +128,11 @@ All three jobs post results as a PR comment on failure.
 
 ---
 
-## `actions-check.yaml` - Actions Check
+## `actions-check.yaml` - GitHub Actions Check
 
 **Triggers:** pull requests to `main` with changes under `.github/workflows/**`.
 
-### Job: `actionlint`
+### Job: `Lint Workflows`
 
 Runs [`actionlint`](https://github.com/rhysd/actionlint) across all workflow files in `.github/workflows/`. Catches issues before they reach GitHub Actions runners:
 
@@ -205,6 +205,6 @@ The `synchronize` trigger ensures branch protection always sees a current status
 
 To enforce that all checks must pass before a PR can be merged, configure branch protection on `main`:
 
-**Settings → Branches → Add rule → Require status checks to pass → add `build-and-scan`, `validate`, `security`, `helm`, `manifests`, `yaml-lint`, `actionlint`, `Validate PR title`**
+**Settings → Branches → Add rule → Require status checks to pass → add `Build and Trivy Scan`, `Validate`, `Checkov Scan`, `Helm Lint`, `Validate Manifests`, `YAML Lint`, `Lint Workflows`, `Validate CODEOWNERS`, `Validate PR Title`**
 
 > `validate` appears in both `terraform-ci` and `codeowners-check`. GitHub treats status checks by job name - both must pass when both are triggered.

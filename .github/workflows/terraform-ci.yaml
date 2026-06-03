@@ -96,7 +96,7 @@ jobs:
             }
 
   security:
-    name: Security scan
+    name: Checkov Scan
     runs-on: ubuntu-latest
 
     permissions:

@@ -1,4 +1,4 @@
-name: Actions Check
+name: GitHub Actions Check
 
 on:
   pull_request:
@@ -10,7 +10,7 @@ on:
 
 jobs:
   actionlint:
-    name: actionlint
+    name: Lint Workflows
     runs-on: ubuntu-latest
 
     permissions:
