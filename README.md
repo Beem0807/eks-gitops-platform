@@ -24,6 +24,8 @@ It covers the full lifecycle from infrastructure provisioning to GitOps-managed 
 | **Thanos** | Long-term metric storage - Prometheus sidecar ships data to S3; Query, Compactor, and StoreGateway provide durable retention |
 | **HPA + metrics-server** | Horizontal pod autoscaling based on CPU utilization |
 | **Loki + Fluent Bit** | Centralized log aggregation backed by S3 object storage, queryable in Grafana |
+| **OTel Collector (agent + gateway)** | Two-tier telemetry pipeline: a DaemonSet agent on every node receives spans from local pods; a central Deployment gateway batches and forwards to Tempo |
+| **Grafana Tempo** | Distributed trace storage - receives spans from the OTel gateway via OTLP gRPC, queryable in Grafana with trace-to-log correlation through Loki; backed by S3 |
 | **Velero** | Cluster backup and restore - backs up Kubernetes resources and EBS volume snapshots to S3 |
 | **Kyverno** | Admission controller - evaluates `ClusterPolicy` rules on every pod admission and writes `PolicyReport` objects; all policies run in Audit mode by default |
 | **Policy Reporter** | Web UI for Kyverno `PolicyReport` and `ClusterPolicyReport` objects - accessible via `kubectl port-forward` |
@@ -72,6 +74,7 @@ See [docs/cost.md](docs/cost.md) for a full per-component breakdown, cost-contro
 | [gitops/monitoring/README.md](gitops/monitoring/README.md) | Prometheus, Grafana, Thanos, Prometheus Adapter, ServiceMonitor, EBS persistence |
 | [gitops/alerts/README.md](gitops/alerts/README.md) | PrometheusRules, Slack alerting, silencing, grouping |
 | [gitops/logs/README.md](gitops/logs/README.md) | Loki S3 backend, Fluent Bit, log querying in Grafana |
+| [gitops/tracing/README.md](gitops/tracing/README.md) | OTel Collector agent/gateway pipeline, Tempo S3 backend, trace querying and log correlation in Grafana |
 | [gitops/security/README.md](gitops/security/README.md) | Kyverno policies, Policy Reporter UI, inspecting policy reports |
 | **Design** | |
 | [docs/design-decisions.md](docs/design-decisions.md) | Why each architectural choice was made - tool selection, configuration defaults, and demo trade-offs |
@@ -194,7 +197,7 @@ bash terraform/scripts/upgrade.sh
 2. Generates or accepts ArgoCD bcrypt hash and Grafana password
 3. Runs `terraform init` → `terraform validate` → `terraform apply`
 4. Updates kubeconfig
-5. Re-applies the ArgoCD cluster secret with the latest Terraform outputs (account ID, VPC ID, domain, Karpenter instance profile, Thanos/Loki/Velero bucket names)
+5. Re-applies the ArgoCD cluster secret with the latest Terraform outputs (account ID, VPC ID, domain, Karpenter instance profile, Thanos/Loki/Velero/Tempo bucket names)
 6. Force-annotates `argocd-admin`, `grafana-admin`, and `alertmanager-webhook` ExternalSecrets to trigger an immediate re-sync from Secrets Manager
 
 ---
@@ -211,7 +214,9 @@ bash terraform/scripts/upgrade.sh
 | 6 | HPA reacts to load | `kubectl get hpa -n simple-time-service -w` while running `python3 scripts/load_test.py` |
 | 7 | Slack alert fires | Fire test alert (see [gitops/alerts/README.md](gitops/alerts/README.md#testing-the-slack-receiver)) - appears in `#alerts-test` within 30s |
 | 8 | Loki API reachable | `kubectl port-forward svc/loki-gateway -n logging 3100:80` → `curl 'http://localhost:3100/loki/api/v1/labels'` |
-| 9 | Logs in Grafana | Explore → Loki datasource → `{namespace="simple-time-service"}` |
+| 9 | Logs in Grafana | Explore → Loki datasource → `{namespace="simple-time-service"}` - log lines include `trace_id` / `span_id` fields in JSON |
+| 9a | OTel pipeline healthy | `kubectl get pods -n tracing` - `otel-gateway` (Deployment) and `otel-agent` (DaemonSet) all `Running` |
+| 9b | Traces in Grafana | Explore → Tempo datasource → **Search** → service `simple-time-service` - spans visible; clicking a trace shows correlated Loki logs |
 | 10 | Thanos Query healthy | `kubectl get pods -n monitoring -l app.kubernetes.io/name=thanos-query` - `Running`; add Thanos datasource in Grafana pointing to `thanos-query.monitoring.svc:9090` |
 | 11 | EBS volumes provisioned | `kubectl get pv` - PVs for Prometheus (20Gi), Alertmanager (2Gi), Thanos Compactor (10Gi), StoreGateway (5Gi) all `Bound` |
 | 12 | Velero running | `kubectl get pods -n velero` - `Running`; `kubectl get backupstoragelocation -n velero` - `Available` |
@@ -345,6 +350,14 @@ bash terraform/scripts/upgrade.sh
 │   │   │   └── grafana-loki-datasource.yaml    # ApplicationSet - Loki datasource ConfigMap (sync-wave 4)
 │   │   └── fluent-bit/
 │   │       └── fluent-bit.yaml                 # ApplicationSet - Fluent Bit DaemonSet (sync-wave 4)
+│   ├── tracing/
+│   │   ├── README.md                           # OTel Collector pipeline, Tempo S3 backend, trace querying and log correlation
+│   │   ├── tempo/
+│   │   │   ├── tempo.yaml                      # ApplicationSet - Tempo trace store S3 backend (sync-wave 6)
+│   │   │   └── grafana-tempo-datasource.yaml   # ApplicationSet - Tempo datasource ConfigMap + Loki correlation (sync-wave 8)
+│   │   └── otel-collector/
+│   │       ├── otel-collector-gateway.yaml     # ApplicationSet - OTel Collector Deployment gateway (sync-wave 6)
+│   │       └── otel-collector-agent.yaml       # ApplicationSet - OTel Collector DaemonSet agent (sync-wave 7)
 │   └── security/
 │       └── kyverno/
 │           ├── kyverno.yaml                    # ApplicationSet - Kyverno admission controller (sync-wave 3)
@@ -376,6 +389,7 @@ bash terraform/scripts/upgrade.sh
     ├── thanos.tf                               # S3 bucket + IRSA roles for Thanos Prometheus sidecar, Compactor, StoreGateway
     ├── loki.tf                                 # S3 bucket + IRSA role for Loki object storage
     ├── velero.tf                               # S3 bucket + IRSA role for Velero backups
+    ├── tempo.tf                                # S3 bucket + IRSA role for Tempo trace storage
     ├── secrets-manager.tf                      # AWS Secrets Manager secrets (ArgoCD, Grafana, Slack)
     ├── .tflint.hcl                             # TFLint AWS ruleset plugin config
     ├── .checkov.yaml                           # Checkov global skip rules (documented false positives)
@@ -426,7 +440,7 @@ The cleanup script runs six steps in order:
 1. **Kubernetes resources** - deletes the root app, all ArgoCD Applications and ApplicationSets, Ingresses, LoadBalancer Services, Karpenter NodePools and NodeClaims, PersistentVolumes, and all namespaces labelled `app.kubernetes.io/part-of=eks-gitops-platform` (including `security`) (every namespace created by the `cluster-namespaces` chart)
 2. **AWS Load Balancers** - deletes any leftover ALB/NLB/Classic ELBs tagged for the cluster that were not removed by step 1
 3. **EBS volumes and snapshots** - deletes EBS volumes tagged `kubernetes.io/cluster/<cluster>=owned` (CSI Driver PVCs with Retain policy), then deletes EBS snapshots tagged for the cluster or with a `velero.io/backup` tag
-4. **S3 buckets** - empties all versioned S3 buckets in the same region whose name contains the cluster name (Thanos, Loki, Velero), draining all object versions and delete markers in batches so that Terraform can delete the buckets cleanly
+4. **S3 buckets** - empties all versioned S3 buckets in the same region whose name contains the cluster name (Thanos, Loki, Velero, Tempo), draining all object versions and delete markers in batches so that Terraform can delete the buckets cleanly
 5. **Kyverno CRDs** - deletes all CRDs in the `kyverno.io` and `wgpolicyk8s.io` API groups; this is handled automatically by `cleanup.sh` using a label selector
 6. **Terraform destroy** - removes all AWS resources provisioned by Terraform
 

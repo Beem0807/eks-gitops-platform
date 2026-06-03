@@ -154,6 +154,7 @@ KARPENTER_INSTANCE_PROFILE_NAME="$(terraform output -raw karpenter_instance_prof
 THANOS_BUCKET_NAME="$(terraform output -raw thanos_bucket_name 2>/dev/null || true)"
 LOKI_BUCKET_NAME="$(terraform output -raw loki_bucket_name 2>/dev/null || true)"
 VELERO_BUCKET_NAME="$(terraform output -raw velero_bucket_name 2>/dev/null || true)"
+TEMPO_BUCKET_NAME="$(terraform output -raw tempo_bucket_name 2>/dev/null || true)"
 
 echo "Updating kubeconfig..."
 aws eks update-kubeconfig \
@@ -241,6 +242,7 @@ metadata:
     thanos-bucket-name: "${THANOS_BUCKET_NAME}"
     loki-bucket-name: "${LOKI_BUCKET_NAME}"
     velero-bucket-name: "${VELERO_BUCKET_NAME}"
+    tempo-bucket-name: "${TEMPO_BUCKET_NAME}"
 type: Opaque
 stringData:
   name: in-cluster-local

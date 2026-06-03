@@ -117,6 +117,10 @@ kubectl delete namespace simple-time-service
 | serviceMonitor.labels | object | `{}` | Extra labels added to the ServiceMonitor (used to target a specific Prometheus instance) |
 | serviceMonitor.path | string | `"/metrics"` | Metrics endpoint path |
 | tolerations | list | `[]` | Pod tolerations |
+| tracing.agentPort | int | `4318` | OTLP HTTP port on the node-local OTel Collector agent; used only when `endpoint` is empty |
+| tracing.enabled | bool | `false` | Enable OpenTelemetry tracing |
+| tracing.endpoint | string | `""` | Direct OTLP HTTP endpoint (e.g. `http://otel-collector.tracing.svc.cluster.local:4318`). When empty, uses the node-local DaemonSet agent via `status.hostIP:agentPort` |
+| tracing.serviceName | string | `"simple-time-service"` | Service name reported in traces and correlated in Grafana Tempo |
 
 ---
 
@@ -138,6 +142,19 @@ helm install simple-time-service charts/simple-time-service \
   --set image.tag=latest \
   --set serviceMonitor.enabled=true
 ```
+
+### Deploy with tracing enabled
+
+Requires the OTel Collector DaemonSet to be running on each node (deployed via `gitops/tracing/`).
+
+```bash
+helm install simple-time-service charts/simple-time-service \
+  --set image.tag=latest \
+  --set serviceMonitor.enabled=true \
+  --set tracing.enabled=true
+```
+
+The chart injects `NODE_IP` (via the downward API) and constructs `OTEL_EXPORTER_OTLP_ENDPOINT=http://$(NODE_IP):4318` automatically so pods always reach the node-local agent without any manual endpoint configuration.
 
 ---
 

@@ -58,6 +58,7 @@ spec:
               - name: logging
               - name: simple-time-service
               - name: security
+              - name: tracing
       destination:
         server: '{{.server}}'
         namespace: argocd

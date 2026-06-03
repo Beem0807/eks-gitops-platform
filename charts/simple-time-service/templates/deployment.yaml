@@ -29,6 +29,19 @@ spec:
         - name: simple-time-service
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.tracing.enabled }}
+          env:
+            {{- if not .Values.tracing.endpoint }}
+            - name: NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            {{- end }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ if .Values.tracing.endpoint }}{{ .Values.tracing.endpoint | quote }}{{ else }}"http://$(NODE_IP):{{ .Values.tracing.agentPort }}"{{ end }}
+            - name: OTEL_SERVICE_NAME
+              value: {{ .Values.tracing.serviceName | quote }}
+          {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.service.targetPort }}

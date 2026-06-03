@@ -71,12 +71,20 @@ gitops/
 │   ├── simple-time-service-alerts.yaml         # ApplicationSet - PrometheusRule (alert expressions) (wave 10)
 │   ├── alertmanager-webhook-secret.yaml        # ApplicationSet - ExternalSecret for Slack webhook (wave 5)
 │   └── alertmanager-slack.yaml                 # ApplicationSet - AlertmanagerConfig (Slack routing) (wave 9)
-└── logs/
-    ├── loki/
-    │   ├── loki.yaml                            # ApplicationSet - Loki single-binary log store (wave 6)
-    │   └── grafana-loki-datasource.yaml         # ApplicationSet - Loki datasource ConfigMap (wave 8)
-    └── fluent-bit/
-        └── fluent-bit.yaml                      # ApplicationSet - Fluent Bit DaemonSet (wave 8)
+├── logs/
+│   ├── loki/
+│   │   ├── loki.yaml                            # ApplicationSet - Loki single-binary log store (wave 6)
+│   │   └── grafana-loki-datasource.yaml         # ApplicationSet - Loki datasource ConfigMap (wave 8)
+│   └── fluent-bit/
+│       └── fluent-bit.yaml                      # ApplicationSet - Fluent Bit DaemonSet (wave 8)
+├── tracing/
+│   ├── README.md                                # OTel Collector pipeline, Tempo S3 backend, trace querying and log correlation
+│   ├── tempo/
+│   │   ├── tempo.yaml                           # ApplicationSet - Tempo trace store S3 backend (wave 6)
+│   │   └── grafana-tempo-datasource.yaml        # ApplicationSet - Tempo datasource ConfigMap + Loki correlation (wave 8)
+│   └── otel-collector/
+│       ├── otel-collector-gateway.yaml          # ApplicationSet - OTel Collector Deployment gateway → Tempo (wave 6)
+│       └── otel-collector-agent.yaml            # ApplicationSet - OTel Collector DaemonSet agent → gateway (wave 7)
 └── security/
     └── kyverno/
         ├── kyverno.yaml                            # ApplicationSet - Kyverno admission controller (wave 3)
@@ -98,6 +106,7 @@ gitops/
 | [monitoring/README.md](monitoring/README.md) | Prometheus, Grafana, Thanos, Prometheus Adapter, ServiceMonitor |
 | [alerts/README.md](alerts/README.md) | PrometheusRules, Slack setup, testing, silencing, grouping |
 | [logs/README.md](logs/README.md) | Loki S3 backend, Fluent Bit, Grafana datasource, LogQL queries |
+| [tracing/README.md](tracing/README.md) | OTel Collector agent/gateway pipeline, Tempo S3 backend, trace querying and Loki correlation |
 | [security/README.md](security/README.md) | Kyverno policies, Policy Reporter UI, policy reports |
 
 ---
@@ -199,10 +208,14 @@ Any push to `main` affecting `gitops/` or `charts/` is automatically applied wit
 | argocd-ingress | argocd | platform | 6 | ALB Ingress at `argocd.platform.<domain>` |
 | policy-reporter | security | security | 6 | Policy Reporter UI (port-forward access) |
 | loki | logging | observability | 6 | Loki log store |
+| tempo | tracing | observability | 6 | Tempo trace store (S3 backend) |
+| otel-collector-gateway | tracing | observability | 6 | OTel Collector Deployment — batches spans and exports to Tempo |
 | prometheus | monitoring | observability | 7 | kube-prometheus-stack |
+| otel-collector-agent | tracing | observability | 7 | OTel Collector DaemonSet — receives spans from local pods, forwards to gateway |
 | simple-time-service | simple-time-service | workloads | 8 | SimpleTimeService Helm chart (HPA, ALB Ingress) |
 | fluent-bit | logging | observability | 8 | Log collector DaemonSet |
 | grafana-loki-datasource | monitoring | observability | 8 | Loki datasource ConfigMap |
+| grafana-tempo-datasource | monitoring | observability | 8 | Tempo datasource ConfigMap (trace-to-log correlation) |
 | grafana-dashboard | monitoring | observability | 8 | SimpleTimeService dashboard ConfigMap |
 | prometheus-adapter | monitoring | observability | 9 | Custom metrics API bridge (enables custom-metric HPA) |
 | alertmanager-slack | monitoring | observability | 9 | AlertmanagerConfig CRD |
@@ -225,8 +238,8 @@ ArgoCD advances through sync waves sequentially, waiting for all resources in th
 | 3 | Karpenter, Velero, **Kyverno** |
 | 4 | ClusterSecretStore, Karpenter NodePools |
 | 5 | All ExternalSecrets, VeleroSchedule, Kyverno ClusterPolicies |
-| 6 | **ArgoCD Ingress**, Loki, Policy Reporter UI |
-| 7 | Prometheus (kube-prometheus-stack) |
+| 6 | **ArgoCD Ingress**, Loki, **Tempo**, OTel Gateway, Policy Reporter UI |
+| 7 | Prometheus (kube-prometheus-stack), **OTel Agent** DaemonSet |
 | 8 | SimpleTimeService, Fluent Bit, Grafana datasource + dashboard |
 | 9 | Prometheus Adapter, AlertmanagerConfig |
 | 10 | PrometheusRules, Thanos |
@@ -244,7 +257,7 @@ All ApplicationSets are scoped to one of five AppProjects defined in `gitops/arg
 | `bootstrap` | `bootstrap-project.yaml` | `argocd` | None - root-app only deploys namespace-scoped ArgoCD resources | root-app only |
 | `namespaces` | `namespaces-project.yaml` | `*` | `Namespace` only | cluster-namespaces (creates namespaces + ResourceQuotas) |
 | `platform` | `platform-project.yaml` | `argocd`, `kube-system`, `karpenter`, `external-secrets`, `external-dns`, `reloader`, `velero`, `kube-node-lease` | All (`*/*`) - infra tools install CRDs and cluster RBAC | ArgoCD self-management, networking, autoscaling, secrets, storage, backup |
-| `observability` | `observability-project.yaml` | `monitoring`, `logging`, `kube-system` | `CustomResourceDefinition`, `ClusterRole`, `ClusterRoleBinding` | Prometheus, Grafana, Thanos, Loki, Fluent Bit, alerts |
+| `observability` | `observability-project.yaml` | `monitoring`, `logging`, `tracing`, `kube-system` | `CustomResourceDefinition`, `ClusterRole`, `ClusterRoleBinding` | Prometheus, Grafana, Thanos, Loki, Fluent Bit, Tempo, alerts |
 | `security` | `security-project.yaml` | `security` | `CustomResourceDefinition`, `ClusterRole`, `ClusterRoleBinding`, webhooks, `ClusterPolicy` | Kyverno admission controller, ClusterPolicies, Policy Reporter |
 | `workloads` | `workloads-project.yaml` | `simple-time-service` | None | Application workloads |
 

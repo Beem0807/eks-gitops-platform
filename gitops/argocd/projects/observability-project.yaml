@@ -8,12 +8,14 @@ metadata:
     app.kubernetes.io/managed-by: argocd
     app.kubernetes.io/component: monitoring
 spec:
-  description: Observability stack - metrics, logs, and alerting (Prometheus, Grafana, Thanos, Loki, Fluent Bit)
+  description: Observability stack - metrics, logs, traces, and alerting (Prometheus, Grafana, Thanos, Loki, Tempo, Fluent Bit)
 
   sourceRepos:
     - https://prometheus-community.github.io/helm-charts
     - registry-1.docker.io/bitnamicharts
     - https://grafana-community.github.io/helm-charts
+    - https://grafana.github.io/helm-charts
+    - https://open-telemetry.github.io/opentelemetry-helm-charts
     - https://fluent.github.io/helm-charts
     # GitOps repo (dashboards, datasources, alert rules, secrets)
     - https://github.com/Beem0807/eks-gitops-platform.git
@@ -23,6 +25,8 @@ spec:
       namespace: monitoring
     - server: https://kubernetes.default.svc
       namespace: logging
+    - server: https://kubernetes.default.svc
+      namespace: tracing
     - server: https://kubernetes.default.svc
       namespace: kube-system
 

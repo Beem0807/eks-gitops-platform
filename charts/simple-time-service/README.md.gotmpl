@@ -81,6 +81,19 @@ helm install simple-time-service charts/simple-time-service \
   --set serviceMonitor.enabled=true
 ```
 
+### Deploy with tracing enabled
+
+Requires the OTel Collector DaemonSet to be running on each node (deployed via `gitops/tracing/`).
+
+```bash
+helm install simple-time-service charts/simple-time-service \
+  --set image.tag=latest \
+  --set serviceMonitor.enabled=true \
+  --set tracing.enabled=true
+```
+
+The chart injects `NODE_IP` (via the downward API) and constructs `OTEL_EXPORTER_OTLP_ENDPOINT=http://$(NODE_IP):4318` automatically so pods always reach the node-local agent without any manual endpoint configuration.
+
 ---
 
 ## Updating this README
