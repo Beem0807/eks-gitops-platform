@@ -4,7 +4,7 @@ The `gitops/alerts/` directory deploys two ArgoCD apps that together form the al
 
 | File | What it deploys |
 |------|----------------|
-| `simple-time-service-alerts.yaml` | `PrometheusRule` CRD - alert expressions evaluated by Prometheus |
+| _(per-application `PrometheusRule` resources)_ | Live with the application they describe, under [`../app/<name>/`](../app/README.md) - not here |
 | `alertmanager-slack.yaml` | `AlertmanagerConfig` CRD - routes matching alerts to a Slack channel |
 
 ---
@@ -16,7 +16,7 @@ The `gitops/alerts/` directory deploys two ArgoCD apps that together form the al
 | `SimpleTimeServiceDown` | Scrape target unreachable for 1 minute | critical |
 | `SimpleTimeServiceHPAAtMaxReplicas` | HPA at max replicas (10) for 5 minutes | warning |
 
-Both rules carry the label `notify: slack`. The Slack route matches on this label - any future alert added to the same `PrometheusRule` automatically routes to Slack without touching the route config.
+Both rules carry `notify: slack` **on the alert itself**, in the rule's own `labels:` block. That placement is load-bearing: Alertmanager matches *alert* labels, while the identical label on the `PrometheusRule` metadata is only how the Prometheus Operator selects the rule file. An alert with the label on the object but not on the rule fires and reaches nobody. Any new alert must add it to its own `labels:` to route to Slack.
 
 ---
 

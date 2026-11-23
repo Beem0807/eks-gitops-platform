@@ -1,0 +1,131 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: mlops
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: mlops
+spec:
+  description: MLOps platform deployed from the separate mlops-platform repository. Optional - not part of the root app.
+
+  # Explicit allowlist. When the MLOps platform starts deploying a component
+  # from a chart repository that is not listed here, its Application fails with
+  # "application repo <url> is not permitted in project 'mlops'" - add the
+  # repository here rather than widening this to '*'.
+  sourceRepos:
+    - https://github.com/Beem0807/mlops-platform.git
+    # This repository, so the MLOps platform can use the shared charts/raw and
+    # charts/namespaces rather than carrying copies of them. Those two charts
+    # are generic plumbing - a passthrough for arbitrary resources and a
+    # namespace factory - and duplicating them would mean two copies drifting
+    # apart for no benefit.
+    #
+    # The trade-off is a real cross-repo coupling: the MLOps Applications
+    # reference chart paths in this repository at targetRevision main, so moving
+    # or renaming charts/raw or charts/namespaces breaks a chart in another
+    # repository. Both paths should be treated as a published interface.
+    #
+    # Note this also permits the MLOps project to deploy *any* path from this
+    # repository, not only those two charts - ArgoCD's sourceRepos matches on
+    # repository URL, not on path. The destination namespaces below remain the
+    # binding constraint on what that could actually affect.
+    - https://github.com/Beem0807/eks-gitops-platform.git
+
+    # ── Upstream chart sources the MLOps platform deploys from ──────────────
+    #
+    # sourceRepos is an allowlist matched on repository URL. An Application
+    # referencing anything absent here fails with
+    # "application repo <url> is not permitted in project 'mlops'" - which is a
+    # clear error, but one that only appears at sync time.
+    #
+    # cert-manager. Required by KServe, whose chart templates an unconditional
+    # cert-manager.io Certificate and relies on the cainjector to populate the
+    # caBundle on six webhook configurations.
+    - https://charts.jetstack.io
+
+    # MLflow. The community chart rather than MLflow's own, because the official
+    # chart pairs with an image that ships neither psycopg2 nor boto3 - both are
+    # pip extras, not core dependencies - and offers no hook to install them.
+    - https://community-charts.github.io/helm-charts
+
+    # KServe, as an OCI chart. ArgoCD takes OCI Helm repositories without the
+    # oci:// scheme, matching how registry-1.docker.io/bitnamicharts and
+    # public.ecr.aws/karpenter are referenced in the platform's own projects.
+    - ghcr.io/kserve/charts
+
+    # Kubeflow Pipelines is deployed from a Kustomize overlay in the MLOps
+    # repository whose base is the upstream manifests pinned with ?ref=.
+    # Listed because ArgoCD resolves remote Kustomize bases from the
+    # repo-server, and keeping it explicit documents the dependency.
+    - https://github.com/kubeflow/pipelines
+
+  destinations:
+    # MLOps platform components and workloads.
+    - server: https://kubernetes.default.svc
+      namespace: mlops
+    - server: https://kubernetes.default.svc
+      namespace: mlops-system
+    # Kubeflow Pipelines. Not folded into mlops-system because KFP's upstream
+    # Kustomize overlay hardcodes `namespace: kubeflow` and warns that moving it
+    # also requires patching a cluster-scoped ClusterRoleBinding, whose subject
+    # namespace kustomize's namespace transformer does not rewrite. Running KFP
+    # on its documented namespace keeps it on the supported upgrade path.
+    - server: https://kubernetes.default.svc
+      namespace: kubeflow
+    # Observability contributions. The MLOps platform adds ServiceMonitors,
+    # PrometheusRules, Grafana dashboard ConfigMaps, and AlertmanagerConfigs to
+    # the existing stack rather than running one of its own, which means
+    # writing into the monitoring namespace. This is the widest grant in this
+    # project and the reason the resource whitelist below is scoped.
+    - server: https://kubernetes.default.svc
+      namespace: monitoring
+
+  # arc-runners is deliberately absent. GitHub Actions runners are a platform
+  # capability: the EKS repository owns the controller *and* the general-purpose
+  # `platform-runners` scale set, so MLOps workflows target it with
+  # `runs-on: platform-runners` and need no access to that namespace at all.
+
+  # Namespace is included because the MLOps namespaces must not exist on an
+  # EKS-only cluster. They are therefore created by the MLOps repo itself
+  # rather than by the platform's charts/namespaces list, which every EKS
+  # deployment gets.
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+    # ML serving and workflow operators install CRDs and cluster RBAC.
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+    # Required by cert-manager and KServe, both of which run from the MLOps
+    # repository. KServe registers six webhook configurations and cannot start
+    # without them; cert-manager's cainjector populates their caBundle.
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+
+  # ── What this project can actually do, stated honestly ──────────────────────
+  #
+  # This is a trusted boundary, not a sandbox. ArgoCD's clusterResourceWhitelist
+  # matches on group and kind only - it cannot scope by resource name - so
+  # granting the webhook kinds means a manifest here could declare a resource
+  # named after one of the platform's own webhooks and ArgoCD would adopt it.
+  #
+  # That is worth knowing, but it does not move the needle as much as it first
+  # appears: ClusterRoleBinding was already granted above, and a
+  # ClusterRoleBinding can bind cluster-admin to a ServiceAccount in
+  # mlops-system - a more direct escalation than a webhook. Any project allowed
+  # to install Kubernetes operators is necessarily trusted at roughly this
+  # level.
+  #
+  # The controls that do real work here are the two above this block: the
+  # namespace destinations, which bound where workloads land, and sourceRepos,
+  # which bounds what can be deployed at all.
+
+  orphanedResources:
+    warn: true

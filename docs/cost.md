@@ -19,9 +19,34 @@ Tear down the cluster when not in use. At rest, only S3, Route 53, and Secrets M
 | S3 | Loki logs, Thanos blocks, Velero backups, Tempo traces | ~$3–6 |
 | Secrets Manager | ~5 secrets | ~$2 |
 | Route 53 | 1 hosted zone | ~$1 |
+| Crossplane | core + RBAC manager + 4 provider pods, on existing core nodes | ~$0 |
+| Actions Runner Controller | controller + idle scale set listener, on existing core nodes | ~$0 |
 | **Total** | | **~$320–325/month** |
 
+Crossplane and ARC add no new billable AWS resources. Both run as pods on the existing managed node group and add roughly 1.0–1.3 GB of memory requests and 0.5 vCPU across six pods - absorbed by the two `m6a.large` core nodes without extra capacity.
+
+They do create cost *indirectly*, which is the part worth watching:
+
+| Source | Why |
+|--------|-----|
+| Crossplane-provisioned resources | A consuming project can create S3 buckets, ECR repositories, and SQS queues on demand. ML datasets and container images are the two largest line items in practice - a single CUDA-based training image can exceed 10 GB |
+| Runner pods | Each in-progress CI job is a runner pod plus a BuildKit sidecar, requesting 1 vCPU / 2 GiB combined. They are scheduled onto Karpenter `app=workload` nodes, so concurrent builds provision nodes - up to `maxRunners: 5`, roughly 5 vCPU / 10 GiB at full tilt. `minRunners: 0` means nothing idles between jobs |
+
+Neither is billed until a consuming project actually uses it. An EKS-only deployment pays nothing extra.
+
 Prices are approximate. Use the [AWS Pricing Calculator](https://calculator.aws/) for an exact figure based on your region and usage.
+
+---
+
+## Watching Crossplane-provisioned spend
+
+Resources created through Crossplane are not in Terraform state, so `terraform destroy` will not remove them and they do not appear in a Terraform plan. List them from the cluster:
+
+```bash
+kubectl get managed
+```
+
+[examples/crossplane/](../examples/crossplane/) sets lifecycle rules on both the S3 and ECR examples for this reason - expiring superseded object versions, aborting incomplete multipart uploads (which accrue storage charges without appearing in an object listing at all), and capping retained image counts. None of that is enforced by the platform, so it has to be in the manifests.
 
 ---
 

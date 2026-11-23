@@ -10,7 +10,7 @@ The `gitops/monitoring/` directory deploys the full observability stack via Argo
 | `thanos/thanos-objstore-secret.yaml` | `thanos-objstore-config` Secret - S3 bucket name and region injected from the ArgoCD cluster secret annotations (sync-wave 5) |
 | `thanos/thanos.yaml` | Thanos - Query, Compactor, StoreGateway (sync-wave 10) |
 | `grafana/grafana-admin-secret.yaml` | ExternalSecret - syncs Grafana admin credentials from AWS Secrets Manager (sync-wave 5) |
-| `grafana/simple-time-service-dashboard.yaml` | Pre-built Grafana dashboard for SimpleTimeService via `charts/raw` (sync-wave 8) |
+| _(per-application Grafana dashboards)_ | Live with the application they describe, under [`../app/<name>/`](../app/README.md) - e.g. `../app/simple-time-service/simple-time-service-dashboard.yaml` |
 
 ---
 
@@ -150,7 +150,7 @@ kubectl logs -n monitoring -l app.kubernetes.io/name=prometheus-adapter
 
 ![Grafana Dashboard](../../docs/images/Grafana%20Dashboard.png)
 
-Deployed via `grafana/simple-time-service-dashboard.yaml` - a ConfigMap with label `grafana_dashboard: "1"` in the `monitoring` namespace. Grafana's sidecar detects the label and imports it automatically. No manual steps required.
+Deployed via [`../app/simple-time-service/simple-time-service-dashboard.yaml`](../app/simple-time-service/simple-time-service-dashboard.yaml) - a ConfigMap with label `grafana_dashboard: "1"` in the `monitoring` namespace. It lives with the application rather than here, while still deploying into `monitoring` because that is the only namespace Grafana's sidecar watches. Grafana's sidecar detects the label and imports it automatically. No manual steps required.
 
 The dashboard (UID `simple-time-service`, auto-refreshes every 30s) has 12 panels across 5 rows:
 

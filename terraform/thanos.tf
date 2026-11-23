@@ -1,7 +1,7 @@
 resource "aws_s3_bucket" "thanos" {
   bucket = "${var.cluster_name}-thanos-metrics-${data.aws_caller_identity.current.account_id}-${var.aws_region}"
 
-  tags = merge(local.common_tags, {
+  tags = merge(local.common_tags, local.crossplane_denied_tags, {
     Name = "${var.cluster_name}-thanos-metrics"
   })
 }

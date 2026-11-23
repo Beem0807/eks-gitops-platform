@@ -26,6 +26,10 @@ spec:
     # Secrets
     - https://charts.external-secrets.io
     - https://stakater.github.io/stakater-charts
+    # CI - Actions Runner Controller (OCI registry)
+    - ghcr.io/actions/actions-runner-controller-charts
+    # Event-driven autoscaling
+    - https://kedacore.github.io/charts
     # GitOps repo (karpenter nodepools, cluster-secret-store, argocd ingress/secret)
     - https://github.com/Beem0807/eks-gitops-platform.git
 
@@ -47,6 +51,18 @@ spec:
     # Karpenter creates a RoleBinding here to delete node Lease objects on node termination
     - server: https://kubernetes.default.svc
       namespace: kube-node-lease
+    # Actions Runner Controller. arc-systems holds the controller; arc-runners
+    # holds only the GitHub App ExternalSecret this project manages - the
+    # runner scale sets themselves belong to the consuming project's own
+    # AppProject, not to platform.
+    - server: https://kubernetes.default.svc
+      namespace: arc-systems
+    - server: https://kubernetes.default.svc
+      namespace: arc-runners
+    # KEDA controller. ScaledObjects and ScaledJobs are namespaced with the
+    # workload they scale, so they belong to that workload's AppProject.
+    - server: https://kubernetes.default.svc
+      namespace: keda
 
   # Infrastructure tools install CRDs, ClusterRoles, and webhooks - allow all cluster-scoped resources
   clusterResourceWhitelist:

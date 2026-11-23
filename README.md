@@ -29,6 +29,9 @@ It covers the full lifecycle from infrastructure provisioning to GitOps-managed 
 | **Velero** | Cluster backup and restore - backs up Kubernetes resources and EBS volume snapshots to S3 |
 | **Kyverno** | Admission controller - evaluates `ClusterPolicy` rules on every pod admission and writes `PolicyReport` objects; all policies run in Audit mode by default |
 | **Policy Reporter** | Web UI for Kyverno `PolicyReport` and `ClusterPolicyReport` objects - accessible via `kubectl port-forward` |
+| **Crossplane** | Kubernetes-native AWS provisioning - S3 buckets, ECR repositories, and SQS queues declared as manifests and reconciled by the same GitOps loop. Authenticates with EKS Pod Identity, one IAM role per AWS service |
+| **Actions Runner Controller** | Self-hosted GitHub Actions runners as ephemeral pods, with a rootless BuildKit sidecar for image builds (no Docker socket). Platform-owned controller **and** a general-purpose `platform-runners` scale set; only deployed when a GitHub App is configured |
+| **KEDA** | Event-driven autoscaling, including scale-to-zero. Consumers declare a `ScaledObject` or `ScaledJob`; the operator reads the external metric with its own narrowly-scoped IAM role (`sqs:GetQueueAttributes` on named queues only) via EKS Pod Identity |
 
 > **Name mapping:** `SimpleTimeService` = source in `app/` = Helm release `simple-time-service` = manifest in `k8s/microservice.yaml`. All the same thing.
 
@@ -76,6 +79,11 @@ See [docs/cost.md](docs/cost.md) for a full per-component breakdown, cost-contro
 | [gitops/logs/README.md](gitops/logs/README.md) | Loki S3 backend, Fluent Bit, log querying in Grafana |
 | [gitops/tracing/README.md](gitops/tracing/README.md) | OTel Collector agent/gateway pipeline, Tempo S3 backend, trace querying and log correlation in Grafana |
 | [gitops/security/README.md](gitops/security/README.md) | Kyverno policies, Policy Reporter UI, inspecting policy reports |
+| [gitops/infrastructure/README.md](gitops/infrastructure/README.md) | Crossplane core, AWS provider packages, EKS Pod Identity, managed resource activation |
+| [gitops/ci/README.md](gitops/ci/README.md) | Actions Runner Controller, GitHub App credentials, runner ownership split, secure image builds |
+| **Optional** | |
+| [optional/mlops/README.md](optional/mlops/README.md) | Enabling and disabling the separate MLOps platform |
+| [examples/crossplane/README.md](examples/crossplane/README.md) | Writing Crossplane manifests - API groups, nested shapes, AWS defaults |
 | **Design** | |
 | [docs/design-decisions.md](docs/design-decisions.md) | Why each architectural choice was made - tool selection, configuration defaults, and demo trade-offs |
 | [docs/security.md](docs/security.md) | Implemented security controls and production hardening roadmap |
@@ -84,6 +92,13 @@ See [docs/cost.md](docs/cost.md) for a full per-component breakdown, cost-contro
 | [docs/runbooks/README.md](docs/runbooks/README.md) | 13 operational runbooks - compute, networking, GitOps, observability, secrets, security, backup |
 
 ---
+
+> **Deploying for the first time?**
+> [docs/first-deployment.md](docs/first-deployment.md) is the ordered path from
+> nothing to a running platform with the MLOps stack on top — including
+> creating the two GitHub Apps field by field, and the Terraform provider fix
+> that must happen before the first `apply`. The sections below are organised
+> by component; that one is organised by sequence.
 
 ## Prerequisites
 
@@ -169,11 +184,96 @@ bash terraform/scripts/bootstrap.sh
 kubectl get applications -n argocd -w
 ```
 
+### Optional - self-hosted GitHub Actions runners
+
+The ARC controller installs as part of the platform and needs no credentials.
+The `platform-runners` scale set does, and is **only deployed when
+`github_config_url` is set** - the ApplicationSet's cluster generator selects on
+a `github-runners=enabled` label that `bootstrap.sh` applies only then. An
+unconfigured scale set would crash-loop its listener against the GitHub API, so
+an EKS-only cluster deliberately gets none.
+
+All four variables default to empty:
+
+```bash
+export TF_VAR_github_app_id="123456"
+export TF_VAR_github_app_installation_id="12345678"
+export TF_VAR_github_app_private_key="$(cat arc-app.private-key.pem)"
+export TF_VAR_github_config_url="https://github.com/<org>"
+```
+
+Workflows then target it with `runs-on: platform-runners`.
+
+See [gitops/ci/README.md](gitops/ci/README.md) for creating the GitHub App, the
+permissions it needs, and building images with the BuildKit sidecar.
+
+---
+
+## Enabling the MLOps platform
+
+The MLOps platform lives in a separate repository
+([mlops-platform](https://github.com/Beem0807/mlops-platform)) and is **not**
+part of this deployment. An EKS-only cluster gets no MLOps resources, no `mlops`
+AppProject, and no MLOps namespaces.
+
+It is opt-in by *location*, not by a flag: the root Application syncs
+`path: gitops` with `directory.recurse: true`, so everything under `gitops/` is
+applied to every cluster. The MLOps integration therefore lives in a top-level
+`optional/` directory that the root app never reads, and is enabled by applying
+it by hand:
+
+```bash
+kubectl apply -f optional/mlops/mlops-project.yaml
+kubectl apply -f optional/mlops/mlops-platform.yaml
+
+kubectl get application mlops-platform -n argocd -w
+```
+
+To disable it again:
+
+```bash
+kubectl delete -f optional/mlops/
+```
+
+Because these two files are applied by hand, they are **not** self-healing -
+re-apply after editing either one. SimpleTimeService is unaffected in both
+directions: it is deployed by `gitops/app/simple-time-service/` as the
+platform's own demonstration and is never touched by the MLOps Application.
+
+### Credentials the MLOps platform expects from here
+
+Two things the MLOps repository cannot provision for itself, both created by
+this repository's Terraform and both optional:
+
+| Terraform variable | Becomes | Needed for |
+|--------------------|---------|-----------|
+| `mlops_github_app_id` | `mlops-ingestion-github-app` in Secrets Manager | The ingestion worker's commit to the MLOps repo |
+| `mlops_github_app_installation_id` | the same entry | |
+| `mlops_github_app_private_key` | the same entry | |
+
+A **separate GitHub App** from `arc-github-app`, deliberately: this one can
+write to the MLOps repository's default branch, and no CI runner should hold
+that. All three default to empty, so an EKS-only `apply` is unaffected — the
+Secrets Manager entry is created either way, because External Secrets fails on
+an *absent* property but accepts an empty value.
+
+`bootstrap.sh` reports which Apps are configured at the end of a run, and
+refuses to proceed if `github_config_url` is set while the ARC App credentials
+are missing — that combination deploys a runner scale set whose listener
+crash-loops against the GitHub API, with an error that names nothing useful.
+
+The worker does not store a token. It signs a JWT with this key and exchanges
+it for an installation token per Job, because an installation token lives 60
+minutes and a cached one can be dead by the time a Job picks it up.
+
+Full detail, including prerequisites and how to allow an additional chart
+repository, is in [optional/mlops/README.md](optional/mlops/README.md).
+
 ---
 
 ## Upgrading
 
-Use `upgrade.sh` whenever you need to re-apply Terraform changes or rotate secrets on an existing cluster. Unlike `bootstrap.sh` it does **not** reinstall ArgoCD or re-apply the root app - it just runs Terraform, refreshes the ArgoCD cluster secret with the latest outputs, and force-annotates all ExternalSecrets so they re-pull from Secrets Manager.
+Use `upgrade.sh` whenever you need to re-apply Terraform changes or rotate secrets on an existing cluster. Unlike `bootstrap.sh` it does **not** reinstall ArgoCD or re-apply the root app - it just runs Terraform, refreshes the ArgoCD cluster secret with the latest outputs, and force-annotates every ExternalSecret so they re-pull from Secrets Manager.
 
 **When to use it:**
 - You changed a Terraform resource and want to apply it
@@ -222,6 +322,14 @@ bash terraform/scripts/upgrade.sh
 | 12 | Velero running | `kubectl get pods -n velero` - `Running`; `kubectl get backupstoragelocation -n velero` - `Available` |
 | 13 | Kyverno policies synced | `kubectl get clusterpolicy` - four policies listed; `kubectl get policyreport -A` - reports generated after pod activity |
 | 14 | Policy Reporter UI reachable | `kubectl port-forward svc/policy-reporter-ui -n security 8080:8080` → open `http://localhost:8080` |
+| 15 | Crossplane healthy | `kubectl get pods -n crossplane-system` - core and `rbac-manager` `Running` |
+| 16 | AWS providers installed | `kubectl get providers.pkg.crossplane.io` - all four `INSTALLED=True` and `HEALTHY=True`. Wave 13 does not start until they are |
+| 17 | Managed resource CRDs served | `kubectl api-resources --api-group=s3.aws.m.upbound.io` - lists buckets etc. Empty means the activation policy did not apply |
+| 18 | Crossplane can provision | Apply `examples/crossplane/s3-bucket.yaml` (adjust the namespace), then `kubectl get managed` - `SYNCED=True` / `READY=True` |
+| 19 | Deny boundary holds | Point a `Bucket` manifest at the Thanos bucket name - must stay `SYNCED=False` with `AccessDenied`. Proves `CrossplaneAccess=deny` is working |
+| 20 | ARC controller running | `kubectl get deploy -n arc-systems` - `arc-gha-rs-controller` available |
+| 21 | Runner scale set registered *(only if `github_config_url` set)* | `kubectl get autoscalingrunnersets -n arc-runners` and GitHub → Settings → Actions → Runners shows `platform-runners` idle |
+| 22 | A job actually runs | Push a workflow with `runs-on: platform-runners` - a pod appears in `arc-runners` and is destroyed after the job |
 
 ---
 
@@ -324,9 +432,12 @@ Screenshots captured from a live deployment.
 │   │   └── argocd-ingress.yaml                 # ApplicationSet - ALB Ingress at argocd.platform.<domain>
 │   ├── namespaces/
 │   │   └── cluster-namespaces.yaml             # ApplicationSet - creates all cluster namespaces (wave -1)
-│   ├── app/
+│   ├── app/                                    # Grouped per application, not per resource type
+│   │   ├── README.md                           # Why directory layout and AppProject scoping are independent
 │   │   └── simple-time-service/
-│   │       └── simple-time-service.yaml        # ApplicationSet - Helm deploy with ALB Ingress
+│   │       ├── simple-time-service.yaml        # ApplicationSet - Helm deploy with ALB Ingress
+│   │       ├── simple-time-service-dashboard.yaml  # ApplicationSet - Grafana dashboard ConfigMap
+│   │       └── simple-time-service-alerts.yaml # ApplicationSet - PrometheusRule (alert expressions)
 │   ├── auto-scaling/
 │   │   ├── cluster-autoscaler/
 │   │   │   └── cluster-autoscaler.yaml         # ApplicationSet - Cluster Autoscaler
@@ -364,10 +475,8 @@ Screenshots captured from a live deployment.
 │   │   │   ├── thanos-objstore-secret.yaml     # ApplicationSet - S3 objstore Secret via raw chart (sync-wave 3)
 │   │   │   └── thanos.yaml                     # ApplicationSet - Thanos query/compactor/storegateway (sync-wave 6)
 │   │   └── grafana/
-│   │       ├── grafana-admin-secret.yaml       # ApplicationSet - ExternalSecret for Grafana credentials
-│   │       └── simple-time-service-dashboard.yaml  # ApplicationSet - Grafana dashboard ConfigMap
-│   ├── alerts/
-│   │   ├── simple-time-service-alerts.yaml     # ApplicationSet - PrometheusRule (alert expressions)
+│   │       └── grafana-admin-secret.yaml       # ApplicationSet - ExternalSecret for Grafana credentials
+│   ├── alerts/                                 # Alertmanager routing only - per-app rules live with the app
 │   │   ├── alertmanager-webhook-secret.yaml    # ApplicationSet - ExternalSecret for Slack webhook
 │   │   └── alertmanager-slack.yaml             # ApplicationSet - AlertmanagerConfig (Slack routing)
 │   ├── logs/
@@ -384,11 +493,35 @@ Screenshots captured from a live deployment.
 │   │   └── otel-collector/
 │   │       ├── otel-collector-gateway.yaml     # ApplicationSet - OTel Collector Deployment gateway (sync-wave 6)
 │   │       └── otel-collector-agent.yaml       # ApplicationSet - OTel Collector DaemonSet agent (sync-wave 7)
-│   └── security/
-│       └── kyverno/
-│           ├── kyverno.yaml                    # ApplicationSet - Kyverno admission controller (sync-wave 3)
-│           ├── kyverno-policies.yaml           # ApplicationSet - ClusterPolicy rules (sync-wave 5)
-│           └── policy-reporter.yaml            # ApplicationSet - Policy Reporter UI (sync-wave 6)
+│   ├── security/
+│   │   └── kyverno/
+│   │       ├── kyverno.yaml                    # ApplicationSet - Kyverno admission controller (sync-wave 3)
+│   │       ├── kyverno-policies.yaml           # ApplicationSet - ClusterPolicy rules (sync-wave 5)
+│   │       └── policy-reporter.yaml            # ApplicationSet - Policy Reporter UI (sync-wave 6)
+│   ├── infrastructure/
+│   │   ├── README.md                           # Crossplane install, Pod Identity, managed resource activation
+│   │   └── crossplane/
+│   │       ├── crossplane.yaml                 # ApplicationSet - Crossplane core via Helm (sync-wave 11)
+│   │       ├── crossplane-providers.yaml       # ApplicationSet - AWS provider packages + runtime configs (sync-wave 12)
+│   │       ├── crossplane-podmonitor.yaml      # ApplicationSet - PodMonitor for Crossplane metrics (sync-wave 12)
+│   │       └── crossplane-provider-config.yaml # ApplicationSet - ClusterProviderConfig + activation policy (sync-wave 13)
+│   └── ci/
+│       ├── README.md                           # ARC architecture, GitHub App setup, secure image builds
+│       └── actions-runner-controller/
+│           ├── arc-runner-identity.yaml       # ApplicationSet - GitHub App Secret + runner ServiceAccount (sync-wave 5)
+│           ├── actions-runner-controller.yaml  # ApplicationSet - ARC controller (sync-wave 11)
+│           └── arc-runner-scale-set.yaml      # ApplicationSet - platform-runners, label-gated (sync-wave 12)
+├── optional/                                   # NOT deployed by root-app - opt-in add-ons
+│   └── mlops/
+│       ├── README.md                           # Enabling and disabling the MLOps platform
+│       ├── mlops-project.yaml                  # AppProject - scopes the separate mlops-platform repo
+│       └── mlops-platform.yaml                 # Application - second app-of-apps, applied by hand
+├── examples/                                   # Reference manifests - not deployed
+│   └── crossplane/
+│       ├── README.md                           # API groups, nested shapes, AWS defaults, troubleshooting
+│       ├── s3-bucket.yaml                      # Bucket + encryption, versioning, public access block, lifecycle
+│       ├── ecr-repository.yaml                 # Repository + LifecyclePolicy
+│       └── sqs-queue.yaml                      # Queue + DLQ + QueueRedrivePolicy
 ├── scripts/
 │   ├── load_test.py                            # Python load generator (no dependencies)
 │   └── k6-staged.js                            # k6 staged ramping-arrival-rate scenario
@@ -407,6 +540,10 @@ Screenshots captured from a live deployment.
     ├── providers.tf
     ├── versions.tf
     ├── karpenter.tf                            # Karpenter IAM + EKS Pod Identity association
+    ├── crossplane.tf                           # Crossplane provider IAM roles + EKS Pod Identity associations
+    ├── actions-runner-controller.tf             # GitHub App credentials in Secrets Manager
+    ├── arc-runner-irsa.tf                      # IRSA for runner pods - ECR push
+    ├── mlops-workload-irsa.tf                  # IRSA for MLOps pods - tag-scoped S3 + SQS
     ├── cluster-autoscaler-irsa.tf              # IRSA for Cluster Autoscaler
     ├── aws-load-balancer-controller-irsa.tf    # IRSA for AWS Load Balancer Controller
     ├── external-dns-irsa.tf                    # IRSA for ExternalDNS

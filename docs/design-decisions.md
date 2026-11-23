@@ -453,6 +453,290 @@ The two-tier setup adds a hop and two separate Helm releases to manage. For a si
 
 ---
 
+## 23. Direct Managed Resources Instead of Crossplane Compositions
+
+**Chosen:** consuming projects write the AWS provider's managed resources directly (`Bucket`, `Repository`, `Queue`). No XRDs, no Compositions, no composition functions.
+
+Crossplane's headline feature is the ability to define a custom API - an XRD such as `S3Bucket` - and have a Composition expand it into several underlying resources with platform defaults baked in. The platform publishes a narrow API, consumers fill in three fields, and settings the platform cares about are simply not expressible by the consumer.
+
+That was built and then removed. The reasoning for dropping it:
+
+- **The abstraction has to earn its indirection.** A Composition is a second schema to maintain, version, and debug. When a composed resource fails, the error is on the managed resource, which is one level removed from the manifest the author wrote - so diagnosing it means understanding both layers.
+- **Crossplane 2.x removed inline patching.** `mode: Resources` no longer exists; the only Composition mode is `Pipeline`, which requires a composition function (`function-patch-and-transform`) as an additional package. Every field mapping becomes a `FromCompositeFieldPath` patch entry rather than a line of YAML, and anything involving a JSON string field or a cross-resource ARN needs a `CombineFromComposite` with a format string.
+- **Consumers lose access to the full API.** Any field the XRD does not expose cannot be set. For S3 alone the provider offers 25 resource types; an XRD covering the useful subset is a large surface to design and a continuous source of "can you add this field" requests.
+
+**Trade-off, stated plainly:** the platform's preferences are now conventions rather than guarantees. A manifest that sets `imageTagMutability: MUTABLE`, skips encryption on a queue, or omits a dead-letter queue will be accepted. [examples/crossplane/](../examples/crossplane/) documents the intended settings and the reasoning for each, and the API surface is deliberately bounded by the activation policy (decision #25), but nothing rejects a non-conforming manifest.
+
+A Kyverno policy layer was also considered for enforcing these invariants at admission, and was not adopted. Worth noting for anyone revisiting this: enforcing with Kyverno *mutate* rules would conflict with ArgoCD. Every app in this repo syncs with `selfHeal: true`, so a field present on the live object but absent from Git reads as drift - ArgoCD reverts the mutation, the webhook reapplies it, and the Application never reaches Synced. Enforcement would have to be `validate` with `Enforce`, rejecting non-conforming manifests rather than fixing them.
+
+What does remain enforced is IAM, which no manifest can talk its way around - see decision #24.
+
+---
+
+## 24. EKS Pod Identity for Crossplane, and Deny-Based IAM Scoping
+
+**Chosen:** EKS Pod Identity for the Crossplane providers, one IAM role per AWS service, allowed account-wide within that service, with an explicit deny on everything Terraform provisions.
+
+**Pod Identity rather than IRSA**, which is what every other workload in this platform uses. The reason is mechanical: the provider pods' ServiceAccounts are created by the Crossplane package manager, not by a Helm chart, so there is no chart value to attach an `eks.amazonaws.com/role-arn` annotation to. Pod Identity needs nothing on the Kubernetes object - the namespace/ServiceAccount to role mapping lives entirely in AWS. The Pod Identity agent addon was already installed and Karpenter already uses this mechanism.
+
+This is what makes the `DeploymentRuntimeConfig` per provider load-bearing rather than cosmetic. A Pod Identity association names a fixed ServiceAccount, but the package manager derives the ServiceAccount name from the *provider revision* - so it changes on every provider upgrade, and AWS authentication would break silently each time. The runtime configs pin the names.
+
+**One role per service.** `provider-aws-s3` holds no ECR or SQS permissions, and none of the three can reach IAM, EC2, or anything else. A compromised or misconfigured S3 provider cannot create an IAM role.
+
+**Why the allow is broad.** Within its own service each role is allowed account-wide, with no name-prefix or tag condition. Both narrower options were evaluated and rejected:
+
+- A **name prefix** condition would force a naming convention onto every consuming repository, and a resource named outside it fails with `AccessDenied` rather than a validation error.
+- A **tag** condition is strictly worse without an enforcement layer. The AWS `ClusterProviderConfig` has no `default_tags` equivalent, so an ownership tag would have to be written by hand in every manifest. Omitting it produces the worst available failure mode: AWS creates the resource, then denies every subsequent read, update, and delete - leaving a managed resource that can neither reconcile nor be deleted. Tag-based ABAC is genuinely viable here (all three services support `aws:ResourceTag`, and S3 additionally exposes `s3:BucketTag`, which uniquely also covers object-level actions), but only alongside something that guarantees the tag.
+
+**Why the deny is precise.** The protection runs in the other direction instead. Terraform stamps `CrossplaneAccess=deny` onto the Thanos, Loki, Velero, and Tempo buckets and the Karpenter interruption queue, and each policy carries a matching `Deny` statement. An explicit deny in IAM cannot be overridden by any allow in any policy, so no manifest can make these roles delete the metric store, the log store, the backup bucket, the trace store, or the queue Karpenter depends on for spot interruption handling. Protecting a new Terraform-created resource is one line: merge `local.crossplane_denied_tags` into its tags.
+
+The S3 deny is keyed on `s3:BucketTag` rather than `aws:ResourceTag` specifically because it also applies to object-level actions. With `aws:ResourceTag`, `forceDestroy` could still empty a protected bucket.
+
+**What remains reachable:** resources in the account carrying no `CrossplaneAccess` tag - anything created outside this repository. Closing that gap needs either an agreed naming convention or an enforced ownership tag.
+
+**This reasoning assumes no org-level guardrail.** Keeping Crossplane out of IAM entirely is a consequence of there being no Service Control Policy or permissions boundary above this account to contain an escalation - not an inherent property of the design. See decision #29 for what changes when those exist.
+
+---
+
+## 25. Managed Resource Activation Instead of Installing Every CRD
+
+**Chosen:** install Crossplane with `provider.defaultActivations: []` and activate three API groups by wildcard.
+
+Crossplane 2.x only serves a provider's managed resource CRDs when a `ManagedResourceActivationPolicy` names them. The AWS provider family ships roughly **2,100** managed resource types. The Helm chart's default is `["*"]`, which activates all of them - a permanent cost in API server memory and one informer per type, for types nothing in this platform uses.
+
+The policy activates `*.s3.aws.m.upbound.io`, `*.ecr.aws.m.upbound.io`, and `*.sqs.aws.m.upbound.io`: around 60 CRDs rather than 2,100, while still letting consuming projects use any resource type within those three services - including sub-resources like `BucketVersioning` and `LifecyclePolicy` - without a platform change.
+
+Only the **namespaced** variants (`*.aws.m.upbound.io`) are activated; the cluster-scoped variants (`*.aws.upbound.io`) are left inactive. Every Crossplane resource therefore lives in a namespace and is governed by that namespace's RBAC, so granting a team the ability to provision a bucket is an ordinary namespaced RoleBinding.
+
+This doubles as the real API boundary now that there is no Composition layer (decision #23): a consuming project cannot provision an RDS instance or an EC2 instance, because those CRDs are not served and the manifest fails with `no matches for kind`.
+
+**Trade-off:** adding a fourth AWS service is three coordinated changes - install the provider package, grant it a role in `terraform/crossplane.tf`, and add its group to the activation policy. Miss the third and the symptom is a confusing `no matches for kind` on a provider that reports Healthy.
+
+The namespaced API has a sharp edge worth recording: it models some nested blocks as single objects where the cluster-scoped API uses single-element arrays, inconsistently even within one resource - and almost every example online uses the cluster-scoped form. Kubernetes always validates field types, so a shape mismatch is rejected with a 400 and the Application goes `SyncFailed`; unknown fields are rejected the same way because ArgoCD sends `fieldValidation=Strict` by default. The one way to turn this into a silent failure is setting `Validate=false` in an Application's `syncOptions`, which switches ArgoCD to `fieldValidation=Ignore` - at which point a misspelled field is dropped and the resource reports Ready with the setting missing. Neither `kubeconform` nor `yamllint` covers the gap, because there is no public schema for the provider CRDs and kubeconform skips these resources entirely.
+
+---
+
+## 26. Actions Runner Controller - Both Halves Platform-Owned
+
+**Chosen:** this repository installs the ARC controller *and* a general-purpose `platform-runners` scale set. Any repository in the organisation uses it with `runs-on: platform-runners`.
+
+ARC splits into a controller that watches `AutoScalingRunnerSet` resources and a per-scale-set listener that polls GitHub for jobs. The controller is cluster-singleton infrastructure — it owns four cluster-scoped CRDs, so two installations would fight over them. That part was never in question.
+
+The scale set is the interesting half. The obvious split is for each consuming project to own its own, since runner *shape* (image, resource limits, GPU) is workload-specific. That was the initial design and it was reversed, for three reasons:
+
+**The chart hardcodes a platform internal.** The scale set chart creates a RoleBinding granting the controller access to the runners namespace, and by default discovers the controller's ServiceAccount with a Helm `lookup` against the live cluster. ArgoCD's repo-server renders charts **without** cluster access, so the lookup returns nil and the chart fails outright with `No gha-rs-controller deployment found`. The fix is pinning `controllerServiceAccount.name: arc-gha-rs-controller`, which is `<controller releaseName>-gha-rs-controller`. So *any* scale set, anywhere, must hardcode the name of the platform's controller Helm release — and renaming that release would silently break a chart in a different repository. That is a bad seam to run across a repository boundary.
+
+**The credential and the AWS identity are already platform-side.** The GitHub App secret originates in AWS Secrets Manager, reachable only by the platform's `ClusterSecretStore` and the External Secrets IRSA role. The `arc-runner` ServiceAccount carries the ECR IRSA role from `terraform/arc-runner-irsa.tf`. Moving the consumer across the boundary would split three things that have to agree.
+
+**It is a capability, not a workload.** One controller, one credential, one pool, any number of consuming repositories. A per-project scale set is the exception, not the pattern.
+
+The namespace split is kept (`arc-systems` for the controller, `arc-runners` for scale sets) so a project that genuinely needs a different shape — GPU, much larger limits, a custom image — can deploy its own there without being granted anything over the controller. `gitops/ci/README.md` documents that path, including the `controllerServiceAccount` block, specifically so nobody has to rediscover the `lookup` failure.
+
+**The scale set is gated on configuration, unlike everything else in this repo.** Its cluster generator selects on a second label, `github-runners: enabled`, which `bootstrap.sh` sets only when `github_config_url` is non-empty. This is necessary rather than tidy: an unconfigured *controller* is harmless because it connects to nothing, but an unconfigured *scale set* crash-loops its listener against the GitHub API forever. With the label absent the generator produces no Application at all — nothing to show Degraded, nothing to prune. Using the generator's own selector keeps this out of the deployment path entirely rather than introducing a deployment profile.
+
+**A GitHub App rather than a PAT:** scoped to its installation, tokens short-lived and refreshed by the listener, not tied to a personal account. All four Terraform variables default to empty, so an EKS-only deployment applies cleanly and `bootstrap.sh` does not require them.
+
+**Not using `containerMode: dind` or a mounted Docker socket.** The Docker socket is a root-equivalent interface to the node: a workflow that reaches it can start a privileged container, mount the host filesystem, and read every other pod's secrets. On a runner executing pull-request code that is cluster takeover, not a hardening nit. `dind` is the same exposure in a different shape — it needs a privileged container. The runner pod instead carries a rootless BuildKit sidecar on `tcp://localhost:1234`, which needs `Unconfined` seccomp and AppArmor because it uses user namespaces and overlayfs — a far narrower concession than privileged.
+
+Runner pods land on Karpenter workload nodes rather than core nodes: a build that exhausts memory should take out a disposable workload node, not the one hosting ArgoCD and Prometheus. The BuildKit cache is an `emptyDir`, so it dies with the runner — a persistent cache would be faster but would carry state between jobs from different pull requests, which is what an ephemeral runner exists to prevent.
+
+---
+
+## 27. Optional MLOps Integration by Directory Location, Not a Feature Flag
+
+**Chosen:** the MLOps ArgoCD Application lives in a top-level `optional/` directory, outside the tree the root app reads, and is enabled with `kubectl apply`.
+
+The root Application syncs `path: gitops` with `directory.recurse: true`. Inclusion is therefore a property of **where a file sits**, not of its contents - every manifest under `gitops/` is applied to every cluster. An `enabled: false` value would not help, because the file would still be discovered and applied.
+
+Two alternatives were considered:
+
+- **`directory.exclude` on the root app.** Rejected because it makes the default deployment depend on a glob matching correctly, and the failure mode is silent: a typo in the pattern deploys MLOps to every EKS-only cluster, which is the exact outcome being prevented.
+- **A second deployment profile** (separate root app per flavour). Rejected as disproportionate - one optional add-on does not justify duplicating the bootstrap path, and the requirement explicitly asked to avoid extra profiles and conditional logic.
+
+Keeping it outside `gitops/` means an EKS-only deployment cannot receive MLOps resources by construction rather than by configuration. GitOps CI asserts this directly: it fails if any manifest under `gitops/` references the `mlops-platform` repository.
+
+The `mlops` AppProject is the boundary once enabled. It permits the `mlops`, `mlops-system`, and `monitoring` namespaces - not `arc-runners`, since GitHub runners are a platform capability (decision #26) that MLOps workflows reach with `runs-on: platform-runners`. `Namespace` *is* granted, because the MLOps namespaces must not exist on an EKS-only cluster and so cannot come from the platform's shared namespace list.
+
+Webhook configuration kinds were initially withheld, on the reasoning that a webhook registered from this project could intercept admission cluster-wide. They are now granted, because cert-manager and KServe both run from the MLOps repository and KServe registers six webhook configurations it cannot start without.
+
+The original reasoning was also weaker than it looked. ArgoCD's `clusterResourceWhitelist` matches on group and kind only - it cannot scope by name - but `ClusterRoleBinding` was granted from the start, and a `ClusterRoleBinding` can bind cluster-admin to a ServiceAccount in `mlops-system`, which is a more direct escalation than a webhook. Any project permitted to install Kubernetes operators is trusted at roughly that level regardless. The controls doing real work are the namespace destinations and `sourceRepos`, not the cluster-resource list.
+
+This is worth being explicit about rather than implying the project is a sandbox: it is a trust boundary for *accidents and scope creep*, not a containment boundary against a hostile manifest.
+
+**Trade-off:** the two files in `optional/mlops/` are applied by hand and are therefore not self-healing - editing them in Git does not change the cluster until they are re-applied. That is inherent to being opt-in: a self-healing toggle would have to be declared somewhere the root app reads, which is the thing being avoided.
+
+SimpleTimeService is unaffected in both directions. It is deployed by `gitops/app/simple-time-service/` as the platform's own demonstration, is not referenced by the MLOps Application, and is neither deployed nor removed when MLOps is enabled.
+
+---
+
+## 28. Workload IAM - Tag-Scoped IRSA, Split Read/Write from Read-Only
+
+**Chosen:** Terraform creates two IRSA roles - `mlops-pipeline` (read/write) and `mlops-serving` (read-only) - authorised by resource *tag* rather than by ARN. Crossplane does not manage IAM.
+
+Crossplane provisioning a bucket and a workload *using* that bucket are separate concerns with separate identities. The Crossplane provider roles are a control plane — create, configure, delete — and deliberately hold no data-plane permissions. Nothing was giving application pods access to the resources being provisioned for them.
+
+**The policy names no resources, and does not need to.** Terraform cannot reference a bucket Crossplane has not created yet, and a Terraform change per bucket would defeat self-service provisioning. Every S3, SQS, and ECR data-plane action supports tag conditions, and for S3 the `s3:BucketTag` key applies to object-level actions as well as bucket-level ones — which is what makes a tag-scoped *object* policy possible at all. So the grant is a tag match: tagging a Crossplane-provisioned bucket `Workload=mlops` is what gives the role access to it, with no IAM change and no Terraform run.
+
+That makes a tag load-bearing for authorisation, which is worth stating plainly: whoever can set tags on a Crossplane resource can bring it into the role's scope. Nothing enforces the tag, so a bucket created without it is simply unreadable — `AccessDenied`, which is the safe direction to fail.
+
+**Two roles, split on a namespace boundary that already exists.** This began as one shared role and was split. The workloads do not need the same thing, and one is materially more exposed: the KServe predictor runs model code and serves external inference requests, and all it needs is to download a model artifact. Under a shared role it also held `s3:DeleteObject` on the dataset bucket, so a compromised predictor could have deleted every dataset. `mlops` is the serving namespace while `mlops-system` and `kubeflow` are platform and pipelines, so the identity boundary needed no new convention - it is the namespace boundary.
+
+Deliberately not split further. A role per component would need per-ServiceAccount trust policies, which reintroduces exactly what IRSA was chosen to avoid: Kubeflow Pipelines alone creates **16** ServiceAccounts whose names change between releases, each needing a Terraform change in a different repository. Read/write versus read-only is where the risk actually sits.
+
+**IRSA rather than Pod Identity**, deliberately opposite to the Crossplane providers (decision #24). A Pod Identity association is an exact namespace/ServiceAccount pair and cannot wildcard. These trust policies use `StringLike` on a namespace, so the consuming repository names its own service accounts without a platform change. The trust policy is only permission to assume - the actual grant is the `eks.amazonaws.com/role-arn` annotation on a ServiceAccount, which keeps the opt-in in the consuming repo.
+
+`kubeflow` is in that list because Kubeflow Pipelines stores run artifacts in S3 and its object store layer supports `credentials.fromEnv`, resolving through the AWS SDK default chain - so the KFP API server, workflow controller, and every pipeline step pod authenticate through this role instead of static access keys in a Secret. KFP occupies its own namespace rather than `mlops-system` because its upstream Kustomize overlay hardcodes `namespace: kubeflow` and warns that moving it also requires patching a cluster-scoped ClusterRoleBinding, whose subject namespace the kustomize namespace transformer does not rewrite. The trade-off is namespace-level granularity — any pod in `mlops` or `mlops-system` can assume the role, which suits a single-team namespace and would need exact service account names if those namespaces ever host more than one team.
+
+This also means writing the role longhand rather than through `terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts`, which emits `StringEquals` on `sub` and cannot express the wildcard.
+
+**Why not let Crossplane manage IAM.** Adding `provider-aws-iam` would keep the bucket and its role together in the consuming repository — genuinely more self-service. It is rejected *for this environment*: a provider that can create roles and attach policies is a direct privilege-escalation path to account admin. See decision #29 for what changes that calculus.
+
+The runner role (`terraform/arc-runner-irsa.tf`) follows the same pattern with exact-ServiceAccount trust rather than a wildcard, because `arc-runners` is shared infrastructure where a new identity should require a deliberate change.
+
+---
+
+## 29. IAM Guardrails Assumed at the Account Layer, Not the Org Layer
+
+**Recorded because it is an assumption, not a conclusion.** Every IAM decision in this document reasons about blast radius *within* a single AWS account. None of them assume an AWS Organization, a Service Control Policy, or a permissions boundary — because this platform does not have one.
+
+That assumption is what makes several decisions come out the way they do, and it is worth making explicit rather than leaving implicit:
+
+- **Decision #24** keeps Crossplane out of IAM entirely, and states "none of the three roles can reach IAM, EC2, or anything else" as an architectural property. It is really a consequence of having no org-level guardrail to catch an escalation.
+- **Decision #28** puts workload roles in Terraform rather than letting Crossplane provision them, for the same reason.
+
+**What changes with guardrails in place.** A permissions boundary caps what any role can do — effective permissions become the intersection of the attached policy and the boundary — so a provider that attaches `AdministratorAccess` to a role it created still produces a role that cannot exceed the ceiling. An SCP makes that ceiling non-bypassable, which is the part that actually matters: a boundary condition written only into Crossplane's own IAM policy is weak, because anyone with account admin can edit that policy. The usual SCP shape is:
+
+- Deny `iam:CreateRole` / `AttachRolePolicy` / `PutRolePolicy` unless `iam:PermissionsBoundary` equals a specific policy ARN
+- Deny `iam:DeleteRolePermissionsBoundary` and `iam:PutRolePermissionsBoundary` outside a break-glass principal
+- Deny `iam:CreatePolicyVersion` on the boundary policy itself, or the ceiling can be raised
+- Deny `iam:*` against platform roles — node roles, the Crossplane provider roles, break-glass
+
+Plus path scoping, so `iam:CreateRole` is limited to `arn:aws:iam::<acct>:role/crossplane/*` and cannot reach `/platform/`.
+
+The one commonly missed: **`iam:PassRole`**. Creating a role is not the only escalation path — passing an existing privileged role to a service that acts as it is just as effective, and a permissions boundary on a newly created role does nothing about it. `iam:PassRole` needs its own scoping, by path and with an `iam:PassedToService` condition.
+
+**With that in place, `provider-aws-iam` becomes the right answer** and workload roles move into Crossplane alongside the resources they grant access to. The tag-scoped Terraform role in decision #28 becomes the fallback rather than the design.
+
+It is not purely a security question either. The tag-scoped role needs no change per bucket, so self-service buys little here. Crossplane-managed IAM earns its keep when each workload needs a *bespoke* policy — at which point a Terraform round-trip per workload is the bottleneck, and with a boundary and SCP it is safe to hand over.
+
+This platform runs in a single account with `enable_cluster_creator_admin_permissions = true` and a public EKS endpoint, both already recorded as demo trade-offs. Adding org-level guardrails is out of scope for it, but the absence should be a stated assumption rather than an invisible one.
+
+---
+
+## 30. KEDA for Event-Driven Work, Not a Polling Deployment
+
+**Decision:** install KEDA as a platform capability, and have consumers declare
+`ScaledJob`s rather than run long-lived pollers.
+
+**Context.** The first design for the MLOps dataset ingestion worker was a
+Deployment with a `while True` loop doing SQS long-polling. It works, and at
+20-second long polls it costs about 130k API calls a month — effectively free.
+
+The problem is not the API calls, it is the pod. Datasets arrive days or weeks
+apart, so that pod spends essentially all of its life idle, and an idle pod
+cannot be consolidated away by Karpenter. The cost of waiting is a node, not a
+request.
+
+**Alternatives considered.**
+
+A **CronJob** calling the worker in drain mode needs no new controller and
+costs nothing while idle. It was the leading option until the latency was
+priced: with a 15-minute schedule, a dataset uploaded during a demo waits up to
+15 minutes for anything to happen. KEDA's `pollingInterval: 30` makes that ~30
+seconds.
+
+**Keeping the Deployment** was rejected on the idle-node argument above.
+
+**Consequences.**
+
+- One more controller to run and upgrade. KEDA is a general capability rather
+  than an MLOps one, so it sits in `gitops/auto-scaling/` beside Karpenter and
+  the EKS-only cluster gets it too — it just has nothing to scale.
+- The operator needs to read the external metric, so `terraform/keda.tf`
+  creates a role with `sqs:GetQueueAttributes` on **two named queue ARNs** and
+  nothing else, bound by EKS Pod Identity. A wildcard here would let anything
+  in the `keda` namespace enumerate the depth of every queue in the account.
+- `scaleOnInFlight` must be set to `"false"` by consumers running `ScaledJob`s.
+  It defaults to true, which counts in-flight messages — so KEDA would see
+  depth ≥ 1 for a whole in-progress run and start a second Job on top of the
+  first. The default is right for a Deployment and wrong for a Job.
+- The application code did not change. `--drain` serves a CronJob and a
+  ScaledJob equally; only the manifest differs.
+
+---
+
+## 31. Cleanup Deletes Crossplane Resources Before the Cluster
+
+**Decision:** `cleanup.sh` deletes Crossplane-managed AWS resources first, as
+its very first action, and waits for Crossplane to confirm.
+
+**Context.** Crossplane-managed resources are **not in Terraform state**.
+Terraform created the cluster; Crossplane running inside that cluster created
+the buckets, repositories, queues and rules that consuming projects declared.
+So `terraform destroy` does not touch them, and destroying the cluster first
+removes the only thing that knows they exist.
+
+The consequence is not untidiness. **S3 bucket names are globally unique**, so
+an orphaned bucket makes the *next* bootstrap of this platform fail to create
+it — and the orphan bills in the meantime.
+
+**Implementation notes.**
+
+- It runs before `cleanup_kubernetes_resources`, which scales ArgoCD and the
+  controllers to zero. Crossplane has to be alive and reconciling to delete
+  anything, and ArgoCD has to be alive to stop re-creating it.
+- Nothing hardcodes a consuming project's resource names. Crossplane gives
+  every managed-resource CRD the `managed` category, so the set is discovered
+  with `kubectl get managed -A`. This repository stays free of knowledge about
+  what any particular consumer declared.
+- Buckets are emptied first, including **noncurrent versions and delete
+  markers**. Versioning is on, so `aws s3 rm --recursive` leaves every old
+  version behind and the `Bucket` resource then sits in `Deleting` forever with
+  `BucketNotEmpty`.
+- On timeout it strips finalizers so the teardown is not blocked, and says
+  loudly that this **orphans** whatever is left — removing a finalizer tells
+  Kubernetes the resource is gone, not AWS.
+- `verify_cleanup` then looks for anything still tagged
+  `ManagedBy=crossplane` via the Resource Groups Tagging API, and checks that
+  both GitHub App secrets were actually deleted rather than left *scheduled*
+  for deletion, which would reserve the name.
+
+---
+
+## 32. Payload Logging Costs the Predictor Its Read-Only Property
+
+**Decision:** grant the MLOps serving role `s3:PutObject`, scoped to the
+`observations/` prefix.
+
+**Context.** The serving role was strictly read-only, and the policy said so in
+a comment: *"No PutObject, no DeleteObject, no multipart actions. A compromised
+predictor pod cannot modify or destroy anything in these buckets."*
+
+KServe v0.21's inference logger writes batched parquet payload logs directly to
+blob storage, and it runs **inside the predictor pod** — so it carries that
+role. Without the grant it fails every upload and drift detection has nothing
+to compare live traffic against.
+
+**Alternatives considered.**
+
+A **receiver service** in the cluster, holding the pipeline role, with the
+logger POSTing CloudEvents to it. That keeps the predictor read-only, at the
+cost of a component in the prediction path that has to be run, scaled and
+paged for — to do something the logger already does.
+
+**Consequences.** The concession is deliberately minimal: one action, scoped by
+resource pattern to `arn:aws:s3:::*/observations/*`, still gated on the bucket's
+`Workload` tag. No delete, no ACL, no multipart abort. The buckets are
+versioned, so even an overwrite inside the prefix retains the prior version.
+
+What is **not** preserved is the absolute claim. A compromised predictor can
+now append objects under its own log prefix. That is the price of having
+production data to detect drift with, and the file-level `checkov` suppression
+was updated to stop asserting the policy grants no write action — a stale
+justification in code is worse than none.
+
+---
+
 ## Demo Trade-offs
 
 The following are intentional shortcuts taken for a demonstration environment. Each entry notes what was simplified and what the production-ready alternative looks like.

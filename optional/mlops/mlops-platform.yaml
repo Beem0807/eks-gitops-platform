@@ -1,0 +1,30 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mlops-platform
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: mlops
+spec:
+  project: mlops
+  source:
+    repoURL: https://github.com/Beem0807/mlops-platform.git
+    targetRevision: main
+    # A second app-of-apps root. This Application discovers the MLOps
+    # platform's own ApplicationSets; the MLOps repository owns everything
+    # below this point, including its own sync waves.
+    path: gitops
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

@@ -1,0 +1,83 @@
+# Example: an ECR repository for training and serving images.
+#
+# Not deployed by anything - see examples/crossplane/README.md.
+---
+apiVersion: ecr.aws.m.upbound.io/v1beta1
+kind: Repository
+metadata:
+  name: model-serving
+  namespace: mlops
+  annotations:
+    # The repository name in AWS. Without this annotation Crossplane uses
+    # metadata.name, so it is only needed when the two should differ - here it
+    # groups the cluster's images under a path in the registry.
+    crossplane.io/external-name: simple-eks/model-serving
+spec:
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: default
+  forProvider:
+    region: ap-south-1
+    # IMMUTABLE means a pushed tag can never be replaced. For an ML platform
+    # this is what makes an image reference recorded against an experiment
+    # actually identify a specific build - with MUTABLE, the image behind a
+    # deployed model can change without the manifest changing, and rollback
+    # stops meaning anything.
+    imageTagMutability: IMMUTABLE
+    # Single object, not a list. encryptionConfiguration below *is* a list.
+    imageScanningConfiguration:
+      scanOnPush: true
+    encryptionConfiguration:
+      - encryptionType: AES256
+    # Deleting a repository that still holds images fails without this.
+    # forceDelete: true
+    tags:
+      Name: model-serving
+      Workload: mlops
+
+---
+# Image retention.
+#
+# ML images are large - a CUDA base layer alone runs to several GB - so an
+# unbounded repository on a busy training pipeline turns into real storage
+# spend. The policy is a JSON string, not structured YAML.
+apiVersion: ecr.aws.m.upbound.io/v1beta1
+kind: LifecyclePolicy
+metadata:
+  name: model-serving-lifecycle
+  namespace: mlops
+spec:
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: default
+  forProvider:
+    region: ap-south-1
+    # Must match the repository's AWS name - the external-name above, not the
+    # Kubernetes object name.
+    repository: simple-eks/model-serving
+    policy: |
+      {
+        "rules": [
+          {
+            "rulePriority": 1,
+            "description": "Expire untagged images after 7 days",
+            "selection": {
+              "tagStatus": "untagged",
+              "countType": "sinceImagePushed",
+              "countUnit": "days",
+              "countNumber": 7
+            },
+            "action": { "type": "expire" }
+          },
+          {
+            "rulePriority": 2,
+            "description": "Keep the 20 most recent tagged images",
+            "selection": {
+              "tagStatus": "any",
+              "countType": "imageCountMoreThan",
+              "countNumber": 20
+            },
+            "action": { "type": "expire" }
+          }
+        ]
+      }

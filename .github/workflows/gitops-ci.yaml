@@ -8,6 +8,8 @@ on:
       - 'gitops/**'
       - 'k8s/**'
       - 'charts/**'
+      - 'optional/**'
+      - 'examples/**'
       - '.github/workflows/gitops-ci.yaml'
   workflow_dispatch:
 
@@ -110,7 +112,7 @@ jobs:
           kubeconform -summary -strict -kubernetes-version 1.34.0 k8s/ \
             2>&1 | tee "$GITHUB_WORKSPACE/kubeconform-k8s-report.txt"
 
-      - name: kubeconform (gitops/)
+      - name: kubeconform (gitops/ and optional/)
         id: kube_gitops
         run: |
           set -o pipefail
@@ -119,8 +121,26 @@ jobs:
             -strict \
             -ignore-missing-schemas \
             -kubernetes-version 1.34.0 \
-            gitops/ \
+            gitops/ optional/ \
             2>&1 | tee "$GITHUB_WORKSPACE/kubeconform-gitops-report.txt"
+
+      # The root app syncs `path: gitops` with recurse: true, so every manifest
+      # under gitops/ is applied to every cluster. The MLOps integration is
+      # opt-in, which means it must not be discoverable there - this asserts
+      # that, rather than trusting the directory layout to stay correct.
+      - name: Assert optional manifests stay outside gitops/
+        run: |
+          if grep -rlE "repoURL:.*mlops-platform" gitops/ 2>/dev/null; then
+            echo "FAIL: a manifest under gitops/ references the mlops-platform repo."
+            echo "Anything under gitops/ is deployed by root-app to every cluster,"
+            echo "including EKS-only ones. Optional integrations belong in optional/."
+            exit 1
+          fi
+          if [ ! -f optional/mlops/mlops-platform.yaml ]; then
+            echo "FAIL: optional/mlops/mlops-platform.yaml is missing."
+            exit 1
+          fi
+          echo "OK: MLOps integration is opt-in and outside the root app's path."
 
       - name: Validate ApplicationSet Go template options
         id: appset_gotemplate
@@ -192,7 +212,7 @@ jobs:
         id: yamllint
         run: |
           set -o pipefail
-          yamllint gitops/ k8s/ charts/ \
+          yamllint gitops/ k8s/ charts/ optional/ examples/ \
             2>&1 | tee "$GITHUB_WORKSPACE/yamllint-report.txt"
 
       - name: Post results as PR comment

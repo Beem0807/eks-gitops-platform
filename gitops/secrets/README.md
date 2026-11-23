@@ -18,7 +18,8 @@ Wave ordering ensures the ESO operator and its admission webhook are fully ready
 AWS Secrets Manager
   ├── argocd-admin              (adminPasswordHash, adminPasswordMtime)
   ├── grafana-admin             (adminUser, adminPassword)
-  └── alertmanager-webhook      (slackWebhookUrl)
+  ├── alertmanager-webhook      (slackWebhookUrl)
+  └── arc-github-app            (githubAppId, githubAppInstallationId, githubAppPrivateKey)
           │
           │  ExternalSecret (1h refresh)
           ▼
@@ -29,7 +30,8 @@ External Secrets Operator
 Kubernetes Secrets
   ├── argocd/argocd-secret              (admin.password, admin.passwordMtime)
   ├── monitoring/grafana-admin          (admin-user, admin-password)
-  └── monitoring/alertmanager-webhook   (slack-webhook-url)
+  ├── monitoring/alertmanager-webhook   (slack-webhook-url)
+  └── arc-runners/arc-github-app        (github_app_id, github_app_installation_id, github_app_private_key)
           │
           │  Reloader watches for changes
           ▼
@@ -48,7 +50,7 @@ Installs the controller, admission webhook, and cert-controller - all pinned to 
 | CRD install | `installCRDs: true` |
 | IRSA | `<cluster-name>-external-secrets-irsa` |
 
-The IRSA policy (in `terraform/external-secrets-irsa.tf`) allows `secretsmanager:GetSecretValue` and `secretsmanager:DescribeSecret` only on secrets tagged `ExternalSecret=true`. All three secrets provisioned by Terraform carry this tag.
+The IRSA policy (in `terraform/external-secrets-irsa.tf`) allows `secretsmanager:GetSecretValue` and `secretsmanager:DescribeSecret` only on secrets tagged `ExternalSecret=true`. Every secret provisioned by Terraform carries this tag.
 
 Verify the operator is running:
 
@@ -88,13 +90,16 @@ kubectl get clustersecretstore aws-secrets-manager
 
 ## ExternalSecrets
 
-Three `ExternalSecret` resources are deployed by their respective component apps (not from this directory). They all reference the `aws-secrets-manager` `ClusterSecretStore` and refresh every hour.
+Four `ExternalSecret` resources are deployed by their respective component apps (not from this directory). They all reference the `aws-secrets-manager` `ClusterSecretStore` and refresh every hour.
 
 | ExternalSecret | Namespace | Secrets Manager secret | Keys synced | Target K8s secret | Creation policy |
 |----------------|-----------|----------------------|-------------|-------------------|-----------------|
 | `argocd-admin-password` | `argocd` | `argocd-admin` | `adminPasswordHash` → `admin.password`<br>`adminPasswordMtime` → `admin.passwordMtime` | `argocd-secret` | `Merge` - patches the existing ArgoCD secret |
 | `grafana-admin` | `monitoring` | `grafana-admin` | `adminUser` → `admin-user`<br>`adminPassword` → `admin-password` | `grafana-admin` | `Owner` |
 | `alertmanager-webhook` | `monitoring` | `alertmanager-webhook` | `slackWebhookUrl` → `slack-webhook-url` | `alertmanager-webhook` | `Owner` |
+| `arc-github-app` | `arc-runners` | `arc-github-app` | `githubAppId` → `github_app_id`<br>`githubAppInstallationId` → `github_app_installation_id`<br>`githubAppPrivateKey` → `github_app_private_key` | `arc-github-app` | `Owner` |
+
+The `arc-github-app` ExternalSecret is deployed by `gitops/ci/actions-runner-controller/arc-runner-identity.yaml`, which also creates the `arc-runner` ServiceAccount that holds the runner's ECR IRSA annotation. Its target key names are fixed by the `gha-runner-scale-set` chart and cannot be renamed. All three Terraform variables default to `""`, so on an EKS-only deployment this ExternalSecret syncs three empty values and still reports `SecretSynced` - External Secrets only fails when a referenced property is *absent*, not when it is empty.
 
 The ArgoCD secret uses `Merge` + `Retain` (deletion policy) because `argocd-secret` is pre-created by the ArgoCD Helm chart - ESO patches it rather than owning it.
 
@@ -108,6 +113,9 @@ Force an immediate re-sync (e.g. after rotating a secret in Secrets Manager):
 
 ```bash
 REFRESH_TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+# Or refresh every ExternalSecret at once, which is what upgrade.sh does:
+#   kubectl annotate externalsecret --all --all-namespaces force-sync="$(date -u +%FT%TZ)" --overwrite
 
 kubectl annotate externalsecret argocd-admin-password \
   -n argocd force-sync="${REFRESH_TS}" --overwrite

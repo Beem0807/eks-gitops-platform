@@ -1,0 +1,313 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: crossplane-providers
+  namespace: argocd
+  annotations:
+    # Wave 12: the Crossplane package manager (wave 11) owns the Provider and
+    # Function CRDs these resources use, so it must be running first.
+    argocd.argoproj.io/sync-wave: "12"
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: crossplane
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            argocd.argoproj.io/secret-type: cluster
+  template:
+    metadata:
+      name: 'crossplane-providers-{{.nameNormalized}}'
+      labels:
+        app.kubernetes.io/part-of: eks-gitops-platform
+        app.kubernetes.io/managed-by: argocd
+        app.kubernetes.io/component: crossplane
+    spec:
+      project: crossplane
+      source:
+        repoURL: https://github.com/Beem0807/eks-gitops-platform.git
+        targetRevision: main
+        path: charts/raw
+        helm:
+          releaseName: crossplane-providers
+          values: |
+            resources:
+
+              # ── DeploymentRuntimeConfigs ────────────────────────────────────
+              # These exist for one reason: to pin each provider pod's
+              # ServiceAccount to a predictable name. The Crossplane package
+              # manager otherwise derives the ServiceAccount name from the
+              # provider revision, so it changes on every provider upgrade -
+              # and the EKS Pod Identity associations in
+              # terraform/crossplane.tf are declared against a fixed
+              # namespace/ServiceAccount pair. Without these, every provider
+              # upgrade would silently break AWS authentication.
+              - apiVersion: pkg.crossplane.io/v1beta1
+                kind: DeploymentRuntimeConfig
+                metadata:
+                  name: provider-aws-family
+                  labels:
+                    app.kubernetes.io/part-of: eks-gitops-platform
+                    app.kubernetes.io/component: crossplane
+                spec:
+                  serviceAccountTemplate:
+                    metadata:
+                      name: provider-aws-family
+                  deploymentTemplate:
+                    spec:
+                      selector: {}
+                      template:
+                        spec:
+                          nodeSelector:
+                            app: core
+                          tolerations:
+                            - key: app
+                              operator: Equal
+                              value: core
+                              effect: NoSchedule
+                          containers:
+                            - name: package-runtime
+                              resources:
+                                requests:
+                                  cpu: 50m
+                                  memory: 128Mi
+                                limits:
+                                  cpu: 250m
+                                  memory: 512Mi
+
+              - apiVersion: pkg.crossplane.io/v1beta1
+                kind: DeploymentRuntimeConfig
+                metadata:
+                  name: provider-aws-s3
+                  labels:
+                    app.kubernetes.io/part-of: eks-gitops-platform
+                    app.kubernetes.io/component: crossplane
+                spec:
+                  serviceAccountTemplate:
+                    metadata:
+                      # Bound to <cluster>-crossplane-s3 by an EKS Pod Identity
+                      # association. Renaming this breaks AWS auth.
+                      name: provider-aws-s3
+                  deploymentTemplate:
+                    spec:
+                      selector: {}
+                      template:
+                        spec:
+                          nodeSelector:
+                            app: core
+                          tolerations:
+                            - key: app
+                              operator: Equal
+                              value: core
+                              effect: NoSchedule
+                          containers:
+                            - name: package-runtime
+                              resources:
+                                requests:
+                                  cpu: 100m
+                                  memory: 256Mi
+                                limits:
+                                  cpu: 500m
+                                  memory: 1Gi
+
+              - apiVersion: pkg.crossplane.io/v1beta1
+                kind: DeploymentRuntimeConfig
+                metadata:
+                  name: provider-aws-ecr
+                  labels:
+                    app.kubernetes.io/part-of: eks-gitops-platform
+                    app.kubernetes.io/component: crossplane
+                spec:
+                  serviceAccountTemplate:
+                    metadata:
+                      name: provider-aws-ecr
+                  deploymentTemplate:
+                    spec:
+                      selector: {}
+                      template:
+                        spec:
+                          nodeSelector:
+                            app: core
+                          tolerations:
+                            - key: app
+                              operator: Equal
+                              value: core
+                              effect: NoSchedule
+                          containers:
+                            - name: package-runtime
+                              resources:
+                                requests:
+                                  cpu: 100m
+                                  memory: 256Mi
+                                limits:
+                                  cpu: 500m
+                                  memory: 1Gi
+
+              - apiVersion: pkg.crossplane.io/v1beta1
+                kind: DeploymentRuntimeConfig
+                metadata:
+                  name: provider-aws-cloudwatchevents
+                  labels:
+                    app.kubernetes.io/part-of: eks-gitops-platform
+                    app.kubernetes.io/component: crossplane
+                spec:
+                  serviceAccountTemplate:
+                    metadata:
+                      name: provider-aws-cloudwatchevents
+                  deploymentTemplate:
+                    spec:
+                      selector: {}
+                      template:
+                        spec:
+                          nodeSelector:
+                            app: core
+                          tolerations:
+                            - key: app
+                              operator: Equal
+                              value: core
+                              effect: NoSchedule
+                          containers:
+                            - name: package-runtime
+                              resources:
+                                requests:
+                                  cpu: 100m
+                                  memory: 256Mi
+                                limits:
+                                  cpu: 500m
+                                  memory: 1Gi
+
+              - apiVersion: pkg.crossplane.io/v1beta1
+                kind: DeploymentRuntimeConfig
+                metadata:
+                  name: provider-aws-sqs
+                  labels:
+                    app.kubernetes.io/part-of: eks-gitops-platform
+                    app.kubernetes.io/component: crossplane
+                spec:
+                  serviceAccountTemplate:
+                    metadata:
+                      name: provider-aws-sqs
+                  deploymentTemplate:
+                    spec:
+                      selector: {}
+                      template:
+                        spec:
+                          nodeSelector:
+                            app: core
+                          tolerations:
+                            - key: app
+                              operator: Equal
+                              value: core
+                              effect: NoSchedule
+                          containers:
+                            - name: package-runtime
+                              resources:
+                                requests:
+                                  cpu: 100m
+                                  memory: 256Mi
+                                limits:
+                                  cpu: 500m
+                                  memory: 1Gi
+
+              # ── Providers ───────────────────────────────────────────────────
+              # The Upbound AWS provider is published as a family: a shared
+              # "family" package owns the ProviderConfig types and credential
+              # handling, and one package per AWS service owns that service's
+              # managed resources. Installing per-service packages instead of a
+              # monolithic provider is what keeps the deployment to three small
+              # controllers rather than one process watching every AWS service.
+              #
+              # Each service package declares a dependency on the family
+              # package. It is installed explicitly here so its version is
+              # pinned in Git rather than resolved at install time.
+              - apiVersion: pkg.crossplane.io/v1
+                kind: Provider
+                metadata:
+                  name: upbound-provider-family-aws
+                  labels:
+                    app.kubernetes.io/part-of: eks-gitops-platform
+                    app.kubernetes.io/component: crossplane
+                spec:
+                  package: xpkg.upbound.io/upbound/provider-family-aws:v2.9.0
+                  revisionHistoryLimit: 1
+                  runtimeConfigRef:
+                    apiVersion: pkg.crossplane.io/v1beta1
+                    kind: DeploymentRuntimeConfig
+                    name: provider-aws-family
+
+              - apiVersion: pkg.crossplane.io/v1
+                kind: Provider
+                metadata:
+                  name: provider-aws-s3
+                  labels:
+                    app.kubernetes.io/part-of: eks-gitops-platform
+                    app.kubernetes.io/component: crossplane
+                spec:
+                  package: xpkg.upbound.io/upbound/provider-aws-s3:v2.9.0
+                  revisionHistoryLimit: 1
+                  runtimeConfigRef:
+                    apiVersion: pkg.crossplane.io/v1beta1
+                    kind: DeploymentRuntimeConfig
+                    name: provider-aws-s3
+
+              - apiVersion: pkg.crossplane.io/v1
+                kind: Provider
+                metadata:
+                  name: provider-aws-ecr
+                  labels:
+                    app.kubernetes.io/part-of: eks-gitops-platform
+                    app.kubernetes.io/component: crossplane
+                spec:
+                  package: xpkg.upbound.io/upbound/provider-aws-ecr:v2.9.0
+                  revisionHistoryLimit: 1
+                  runtimeConfigRef:
+                    apiVersion: pkg.crossplane.io/v1beta1
+                    kind: DeploymentRuntimeConfig
+                    name: provider-aws-ecr
+
+              - apiVersion: pkg.crossplane.io/v1
+                kind: Provider
+                metadata:
+                  name: provider-aws-sqs
+                  labels:
+                    app.kubernetes.io/part-of: eks-gitops-platform
+                    app.kubernetes.io/component: crossplane
+                spec:
+                  package: xpkg.upbound.io/upbound/provider-aws-sqs:v2.9.0
+                  revisionHistoryLimit: 1
+                  runtimeConfigRef:
+                    apiVersion: pkg.crossplane.io/v1beta1
+                    kind: DeploymentRuntimeConfig
+                    name: provider-aws-sqs
+
+              # EventBridge. Upjet derives API groups from Terraform resource
+              # names, and an EventBridge rule is aws_cloudwatch_event_rule - so
+              # the package and its API group are both "cloudwatchevents", not
+              # "eventbridge".
+              - apiVersion: pkg.crossplane.io/v1
+                kind: Provider
+                metadata:
+                  name: provider-aws-cloudwatchevents
+                  labels:
+                    app.kubernetes.io/part-of: eks-gitops-platform
+                    app.kubernetes.io/component: crossplane
+                spec:
+                  package: xpkg.upbound.io/upbound/provider-aws-cloudwatchevents:v2.9.0
+                  revisionHistoryLimit: 1
+                  runtimeConfigRef:
+                    apiVersion: pkg.crossplane.io/v1beta1
+                    kind: DeploymentRuntimeConfig
+                    name: provider-aws-cloudwatchevents
+      destination:
+        server: '{{.server}}'
+        namespace: crossplane-system
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - ServerSideApply=true

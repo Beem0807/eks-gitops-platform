@@ -74,12 +74,20 @@ Checkov results are posted as a PR comment on failure and uploaded to the GitHub
 | `CKV_AWS_356` | `cluster_autoscaler` | `autoscaling:Describe*` and `ec2:Describe*` do not support resource-level ARNs in AWS |
 | `CKV_AWS_356` | `external_dns` | `route53:List*` actions do not support resource-level ARNs in AWS |
 | `CKV_AWS_111`, `CKV_AWS_356` | `velero` | `ec2:CreateSnapshot` and `ec2:Describe*` do not support resource-level ARNs in AWS |
+| `CKV_AWS_111`, `CKV_AWS_356` | `crossplane_s3` | Consuming projects name their own buckets, so there is no prefix or tag to condition the allow on. S3 bucket ARNs are also global, so `arn:aws:s3:::*` is the only expressible scope. Terraform-owned buckets are carved out by an explicit `Deny` |
+| `CKV_AWS_111`, `CKV_AWS_356` | `crossplane_ecr` | Scoped to `repository/*` in one account and region; narrowing further would impose a naming convention on every consuming repository. Terraform-owned repositories are carved out by an explicit `Deny` |
+| `CKV_AWS_111`, `CKV_AWS_356` | `crossplane_sqs` | Scoped to one account and region; the Karpenter interruption queue is carved out by an explicit `Deny` |
+| `CKV_AWS_111`, `CKV_AWS_356` | `mlops_pipeline` | Resources are provisioned by Crossplane after the role exists, so the policy authorises by `Workload` tag rather than by ARN. S3 bucket ARNs are also global |
+| `CKV_AWS_356` | `mlops_serving` | Same tag-based scoping; this policy grants no write action at all |
+| `CKV_AWS_111`, `CKV_AWS_356` | `crossplane_events` | Scoped to EventBridge rules in one account and region; `events:ListRules` is bus-scoped and cannot be narrowed to a rule ARN |
+
+See [design decision #24](../docs/design-decisions.md#24-eks-pod-identity-for-crossplane-and-deny-based-iam-scoping) for why the Crossplane policies are scoped with a deny rather than a conditional allow.
 
 ---
 
 ## `gitops-ci.yaml` - GitOps / Kubernetes CI
 
-**Triggers:** pull requests to `main` with changes under `gitops/**`, `k8s/**`, or `charts/**`.
+**Triggers:** pull requests to `main` with changes under `gitops/**`, `k8s/**`, `charts/**`, `optional/**`, or `examples/**`.
 
 Protects the GitOps repo from broken YAML, invalid manifests, and broken Helm templates before ArgoCD ever sees them.
 
@@ -97,16 +105,21 @@ Protects the GitOps repo from broken YAML, invalid manifests, and broken Helm te
 | Step | What it checks |
 |------|----------------|
 | `kubeconform` on `k8s/` | Strict schema validation against Kubernetes 1.34 |
-| `kubeconform` on `gitops/` | Schema validation with `--ignore-missing-schemas` - standard K8s resources are validated; ArgoCD and Prometheus CRDs are skipped |
+| `kubeconform` on `gitops/` and `optional/` | Schema validation with `--ignore-missing-schemas` - standard K8s resources are validated; ArgoCD and Prometheus CRDs are skipped |
 | ApplicationSet Go template options | Every `kind: ApplicationSet` file must have `goTemplate: true` and `goTemplateOptions: ["missingkey=error"]` |
+| Optional manifests stay optional | Fails if any manifest under `gitops/` references the `mlops-platform` repo, and if `optional/mlops/mlops-platform.yaml` is missing |
 
 **Why the ApplicationSet check matters:**
 - `goTemplate: true` - enables Go template syntax in the ApplicationSet generator; without it, template expressions are rendered literally
 - `missingkey=error` - makes ArgoCD fail at sync time if a template variable is undefined, instead of silently rendering an empty string which can produce broken manifests that pass validation but misbehave at runtime
 
+**Why the optional-manifest check matters:**
+
+The root Application syncs `path: gitops` with `directory.recurse: true`, so inclusion in a deployment is a property of *where a file sits*, not of its contents. A manifest referencing the MLOps repo placed anywhere under `gitops/` would be applied to every cluster, including EKS-only ones. The check asserts the boundary rather than trusting the directory layout to stay correct through future edits.
+
 ### Job: `yaml-lint`
 
-Runs `yamllint` across `gitops/`, `k8s/`, and `charts/` (excluding `charts/*/templates/` which contain Go template syntax).
+Runs `yamllint` across `gitops/`, `k8s/`, `charts/`, `optional/`, and `examples/` (excluding `charts/*/templates/` which contain Go template syntax).
 
 Config is in `.yamllint.yaml` at the repo root. It extends `yamllint`'s built-in `default` profile and overrides the following rules:
 

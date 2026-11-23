@@ -1,0 +1,126 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: arc-runner-identity
+  namespace: argocd
+  annotations:
+    # Wave 5: alongside every other ExternalSecret, after the
+    # ClusterSecretStore exists (wave 4).
+    argocd.argoproj.io/sync-wave: "5"
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: secrets
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            argocd.argoproj.io/secret-type: cluster
+        values:
+          arcRunnerRoleArn: '{{index .metadata.annotations "arc-runner-role-arn"}}'
+  template:
+    metadata:
+      name: 'arc-runner-identity-{{.nameNormalized}}'
+      labels:
+        app.kubernetes.io/part-of: eks-gitops-platform
+        app.kubernetes.io/managed-by: argocd
+        app.kubernetes.io/component: secrets
+    spec:
+      project: platform
+      source:
+        repoURL: https://github.com/Beem0807/eks-gitops-platform.git
+        targetRevision: main
+        path: charts/raw
+        helm:
+          releaseName: arc-runner-identity
+          values: |
+            resources:
+              # GitHub App credentials for runner scale sets.
+              #
+              # This Secret lands in arc-runners rather than arc-systems: the
+              # ARC controller never authenticates to GitHub, the per-scale-set
+              # listener does, and listeners run in the namespace their
+              # AutoScalingRunnerSet lives in.
+              #
+              # The platform owns this Secret; consuming projects reference it
+              # by name from their own runner scale set:
+              #
+              #   githubConfigSecret: arc-github-app
+              #
+              # The three key names are the ones the gha-runner-scale-set chart
+              # requires verbatim - they are not free-form.
+              #
+              # A GitHub App rather than a PAT: it is scoped to the
+              # installation, its tokens are short-lived and refreshed by the
+              # listener, and it is not tied to anyone's personal account.
+              - apiVersion: external-secrets.io/v1beta1
+                kind: ExternalSecret
+                metadata:
+                  name: arc-github-app
+                  namespace: arc-runners
+                spec:
+                  refreshInterval: 1h
+                  secretStoreRef:
+                    name: aws-secrets-manager
+                    kind: ClusterSecretStore
+                  target:
+                    name: arc-github-app
+                    creationPolicy: Owner
+                  data:
+                    - secretKey: github_app_id
+                      remoteRef:
+                        key: arc-github-app
+                        property: githubAppId
+                        conversionStrategy: Default
+                        decodingStrategy: None
+                        metadataPolicy: None
+
+                    - secretKey: github_app_installation_id
+                      remoteRef:
+                        key: arc-github-app
+                        property: githubAppInstallationId
+                        conversionStrategy: Default
+                        decodingStrategy: None
+                        metadataPolicy: None
+
+                    - secretKey: github_app_private_key
+                      remoteRef:
+                        key: arc-github-app
+                        property: githubAppPrivateKey
+                        conversionStrategy: Default
+                        decodingStrategy: None
+                        metadataPolicy: None
+
+              # ServiceAccount for the runner pods.
+              #
+              # The runner scale set chart generates its own ServiceAccount
+              # named after the Helm release and supports no annotations on it,
+              # so it cannot carry an IRSA binding. The scale set sets
+              # template.spec.serviceAccountName to point at this one instead.
+              #
+              # No RoleBinding: the runners do not use containerMode
+              # kubernetes, so they need no Kubernetes API access at all. The
+              # only reason this ServiceAccount exists is to hold the AWS
+              # identity for pushing images to ECR.
+              - apiVersion: v1
+                kind: ServiceAccount
+                metadata:
+                  name: arc-runner
+                  namespace: arc-runners
+                  annotations:
+                    eks.amazonaws.com/role-arn: '{{ .values.arcRunnerRoleArn }}'
+                  labels:
+                    app.kubernetes.io/part-of: eks-gitops-platform
+                    app.kubernetes.io/component: ci
+      destination:
+        server: '{{.server}}'
+        namespace: arc-runners
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - ServerSideApply=true

@@ -26,12 +26,22 @@ This directory provisions the AWS infrastructure: a VPC and an EKS cluster. The 
 | Node security group | NLB NodePort rule optional (`enable_nlb_nodeport_rule`); Karpenter discovery tag when `enable_karpenter_discovery_tags=true` |
 | EKS add-ons | `coredns`, `kube-proxy`, `vpc-cni`, `eks-pod-identity-agent` managed by the EKS module |
 | Karpenter | IAM controller role + EKS Pod Identity association + node IAM role + instance profile + SQS interruption queue |
+| KEDA | IAM role + EKS Pod Identity association on `keda:keda-operator`, granting `sqs:GetQueueAttributes` on two named queue ARNs only (`keda.tf`) |
 | IRSA roles | Cluster Autoscaler, AWS Load Balancer Controller, ExternalDNS, External Secrets Operator, EBS CSI Driver controller, Thanos Prometheus sidecar, Thanos Compactor + StoreGateway, Loki, Velero, Tempo |
+| MLOps workload roles | `mlops-pipeline` (S3 read/write + SQS, for `mlops-system` and `kubeflow`) and `mlops-serving` (S3 read plus `PutObject` on `observations/` only, for `mlops`) - both tag-scoped (`mlops-workload-irsa.tf`) |
+| ARC runner role | ECR push for the `arc-runners:arc-runner` service account (`arc-runner-irsa.tf`) |
+| Crossplane provider roles | One per AWS service (s3, ecr, sqs, cloudwatchevents), each with an explicit `Deny` on Terraform-owned resources tagged `CrossplaneAccess=deny` (`crossplane.tf`) |
 | Thanos S3 bucket | `<cluster-name>-thanos-metrics-<account-id>-<region>` - versioned, AES256-encrypted, public access blocked |
 | Loki S3 bucket | `<cluster-name>-loki-logs-<account-id>-<region>` - versioned, AES256-encrypted, public access blocked |
 | Velero S3 bucket | `<cluster-name>-velero-backups-<account-id>-<region>` - versioned, AES256-encrypted, public access blocked |
 | Tempo S3 bucket | `<cluster-name>-tempo-traces-<account-id>-<region>` - versioned, AES256-encrypted, public access blocked |
-| Secrets Manager | `argocd-admin`, `grafana-admin`, `alertmanager-webhook` secrets provisioned by Terraform |
+
+> All four buckets and the Karpenter interruption queue also carry `CrossplaneAccess=deny` (`local.crossplane_denied_tags`). The Crossplane provider IAM policies in `crossplane.tf` carry a matching `Deny` statement, so Crossplane cannot read, modify, or delete them. Adding that tag to a new Terraform-created bucket or queue is all that is needed to protect it - no IAM change.
+| Crossplane IAM | Four roles (`<cluster>-crossplane-s3`, `-ecr`, `-sqs`, `-events`), one policy each, and four EKS Pod Identity associations in `crossplane-system` |
+| Workload IAM | `<cluster>-mlops-pipeline` - IRSA, namespace-wildcard trust on `mlops-system`/`kubeflow`, S3 and SQS read/write scoped by the `Workload=mlops` tag |
+| Serving IAM | `<cluster>-mlops-serving` - IRSA, namespace-wildcard trust on `mlops`, S3 **read-only** scoped by the same tag |
+| CI IAM | `<cluster>-arc-runner` - IRSA for the `arc-runners:arc-runner` ServiceAccount, ECR push and pull |
+| Secrets Manager | `argocd-admin`, `grafana-admin`, `alertmanager-webhook`, `arc-github-app`, `mlops-ingestion-github-app` secrets provisioned by Terraform. All with `recovery_window_in_days = 0`, so a destroy frees the name immediately instead of reserving it for 30 days and breaking the next bootstrap |
 
 Modules used: [`terraform-aws-modules/eks/aws`](https://registry.terraform.io/modules/terraform-aws-modules/eks/aws/latest), [`terraform-aws-modules/vpc/aws`](https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws/latest), and [`terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts`](https://registry.terraform.io/modules/terraform-aws-modules/iam/aws/latest).
 
@@ -130,6 +140,34 @@ All tuneable values are declared in `variables.tf` and can be overridden in `ter
 | `grafana_admin_user` | `admin` | Grafana admin username |
 | `grafana_admin_password` | (required) | Grafana admin password (set by `bootstrap.sh`) |
 | `alertmanager_slack_webhook_url` | (required) | Slack incoming webhook URL for Alertmanager |
+| `github_app_id` | `""` | GitHub App ID for Actions Runner Controller runner scale sets |
+| `github_app_installation_id` | `""` | GitHub App installation ID |
+| `github_app_private_key` | `""` | PEM-encoded GitHub App private key (sensitive) |
+| `github_config_url` | `""` | GitHub org or repo the `platform-runners` scale set registers with. **Empty disables the scale set entirely** |
+| `mlops_github_app_id` | `""` | App ID of a **separate** GitHub App, used by the MLOps ingestion worker to commit dataset pointers |
+| `mlops_github_app_installation_id` | `""` | Its installation ID |
+| `mlops_github_app_private_key` | `""` | Its PEM private key (sensitive) |
+
+Runner tuning (`minRunners`, `maxRunners`, image, resources) is not exposed as a
+Terraform variable - it affects no AWS resource. Those live in
+[gitops/ci/actions-runner-controller/arc-runner-scale-set.yaml](../gitops/ci/actions-runner-controller/arc-runner-scale-set.yaml)
+so they reconcile through ArgoCD rather than requiring a Terraform run.
+
+All seven GitHub variables default to empty, so an EKS-only deployment applies cleanly without them and `bootstrap.sh` does not require them. `github_config_url` additionally acts as the deployment gate: `bootstrap.sh` and `upgrade.sh` set a `github-runners=enabled` label on the ArgoCD cluster Secret only when it is non-empty, and the runner scale set's ApplicationSet selects on that label. The `arc-github-app` Secrets Manager entry is created either way; nothing consumes it until a project declares a runner scale set. See [gitops/ci/README.md](../gitops/ci/README.md) for creating the App.
+
+The three `mlops_github_app_*` variables are a **different App**, and must be:
+that one needs `Contents: read and write` on the MLOps repository so the
+ingestion worker can commit a dataset pointer, and no CI runner should hold
+commit rights it has no use for. Both Apps can be owned by a personal account;
+no organisation is required. `bootstrap.sh` prints which of the two are
+configured at the end of a run, and fails fast if `github_config_url` is set
+while the ARC App values are missing — that combination produces a runner
+listener that crash-loops against the GitHub API with an unhelpful error.
+
+`bootstrap.sh` also **does not** store a usable token for the MLOps App: the
+worker signs a JWT with the private key and exchanges it for a 60-minute
+installation token per Job, because a token cached in a Secret can expire
+between the refresh and the Job that reads it.
 
 To deploy in a different region, update `aws_region` and the `azs` list in `terraform.tfvars`.
 
@@ -210,7 +248,7 @@ bash terraform/scripts/bootstrap.sh
 
 ### upgrade.sh - re-apply Terraform on a running cluster
 
-Use `upgrade.sh` when you need to apply Terraform changes or rotate secrets without reinstalling ArgoCD. It re-runs Terraform, refreshes the ArgoCD cluster secret with the latest outputs (including Thanos/Loki/Velero/Tempo bucket names), and force-annotates all three ExternalSecrets to trigger an immediate re-sync.
+Use `upgrade.sh` when you need to apply Terraform changes or rotate secrets without reinstalling ArgoCD. It re-runs Terraform, refreshes the ArgoCD cluster secret with the latest outputs (including Thanos/Loki/Velero/Tempo bucket names), and force-annotates every ExternalSecret in the cluster to trigger an immediate re-sync.
 
 ```bash
 export TF_VAR_alertmanager_slack_webhook_url="https://hooks.slack.com/..."
@@ -219,13 +257,16 @@ bash terraform/scripts/upgrade.sh
 
 ### cleanup.sh - tear everything down
 
-`terraform/scripts/cleanup.sh` removes all ArgoCD apps, cleans up AWS resources that Terraform cannot track, then destroys the full infrastructure. It runs five steps in order:
+`terraform/scripts/cleanup.sh` removes all ArgoCD apps, cleans up AWS resources that Terraform cannot track, then destroys the full infrastructure. It runs six steps in order:
 
+0. **Crossplane-managed AWS resources** - runs **first**, before anything is scaled down, because Crossplane must be alive to delete what it owns and ArgoCD must be alive to stop re-creating it. These resources are **not in Terraform state**: a consuming project declared them, Crossplane created them, and `terraform destroy` does not know about them. Getting the order wrong orphans them, and because **S3 bucket names are globally unique** an orphaned bucket makes the *next* bootstrap fail to create it. The step discovers them generically (`kubectl get managed -A`, using the `managed` category Crossplane puts on every MR CRD) so this repository hardcodes no consumer's resource names; empties versioned buckets including noncurrent versions and delete markers; waits up to `MLOPS_WAIT_SECONDS` (default 300) for confirmation; and on timeout strips finalizers while stating loudly that doing so **orphans** whatever remains, since removing a finalizer tells Kubernetes the resource is gone, not AWS
 1. **Kubernetes resources** - deletes the root app, all ArgoCD Applications and ApplicationSets, Ingresses, LoadBalancer Services, Karpenter NodePools and NodeClaims, PersistentVolumes, and all platform namespaces (including `velero`)
 2. **AWS Load Balancers** - deletes leftover ALB/NLB/Classic ELBs tagged for the cluster
 3. **EBS volumes and snapshots** - deletes EBS volumes tagged `kubernetes.io/cluster/<cluster>=owned` (CSI Driver PVCs left behind by the `Retain` reclaim policy), then deletes EBS snapshots tagged for the cluster or carrying a `velero.io/backup` tag
 4. **S3 buckets** - empties all versioned S3 buckets in the same region whose name contains the cluster name (Thanos, Loki, Velero, Tempo), draining all object versions and delete markers in batches so that Terraform can delete the buckets cleanly
-5. **Terraform destroy** - removes all remaining AWS resources
+5. **Terraform destroy** - removes all remaining AWS resources, including both GitHub App Secrets Manager entries
+
+`verify_cleanup` then checks for anything still tagged `ManagedBy=crossplane` through the Resource Groups Tagging API, and confirms both GitHub App secrets are actually gone rather than merely *scheduled* for deletion - a scheduled secret keeps its name reserved and the next bootstrap fails to create it.
 
 ---
 

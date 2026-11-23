@@ -18,6 +18,8 @@ gitops/
 │   │   ├── namespaces-project.yaml             # AppProject - cluster namespace lifecycle
 │   │   ├── platform-project.yaml               # AppProject - ArgoCD, infra, networking, secrets
 │   │   ├── observability-project.yaml          # AppProject - monitoring, logging, alerting
+│   │   ├── security-project.yaml               # AppProject - Kyverno and policy resources
+│   │   ├── crossplane-project.yaml             # AppProject - Crossplane control plane
 │   │   └── workloads-project.yaml              # AppProject - application workloads
 │   ├── argocd.yaml                             # Application - ArgoCD self-managed via Helm
 │   ├── argocd-admin-secret.yaml                # ApplicationSet - ExternalSecret for ArgoCD admin password (wave 5)
@@ -25,8 +27,11 @@ gitops/
 ├── namespaces/
 │   └── cluster-namespaces.yaml                 # ApplicationSet - creates all cluster namespaces (wave -1)
 ├── app/
+│   ├── README.md                                # Per-application grouping, project scoping, adding an app
 │   └── simple-time-service/
-│       └── simple-time-service.yaml            # ApplicationSet - Helm deploy with ALB Ingress (wave 8)
+│       ├── simple-time-service.yaml            # ApplicationSet - Helm deploy with ALB Ingress (wave 8)
+│       ├── simple-time-service-dashboard.yaml  # ApplicationSet - Grafana dashboard ConfigMap (wave 8)
+│       └── simple-time-service-alerts.yaml     # ApplicationSet - PrometheusRule (wave 10)
 ├── auto-scaling/
 │   ├── cluster-autoscaler/
 │   │   └── cluster-autoscaler.yaml             # ApplicationSet - Cluster Autoscaler (wave 1)
@@ -65,10 +70,8 @@ gitops/
 │   │   ├── thanos-objstore-secret.yaml         # ApplicationSet - S3 objstore Secret (wave 5)
 │   │   └── thanos.yaml                         # ApplicationSet - Thanos query/compactor/storegateway (wave 10)
 │   └── grafana/
-│       ├── grafana-admin-secret.yaml           # ApplicationSet - ExternalSecret for Grafana credentials (wave 5)
-│       └── simple-time-service-dashboard.yaml  # ApplicationSet - Grafana dashboard ConfigMap (wave 8)
-├── alerts/
-│   ├── simple-time-service-alerts.yaml         # ApplicationSet - PrometheusRule (alert expressions) (wave 10)
+│       └── grafana-admin-secret.yaml           # ApplicationSet - ExternalSecret for Grafana credentials (wave 5)
+├── alerts/                                      # Alertmanager routing only - per-app rules live with the app
 │   ├── alertmanager-webhook-secret.yaml        # ApplicationSet - ExternalSecret for Slack webhook (wave 5)
 │   └── alertmanager-slack.yaml                 # ApplicationSet - AlertmanagerConfig (Slack routing) (wave 9)
 ├── logs/
@@ -85,12 +88,30 @@ gitops/
 │   └── otel-collector/
 │       ├── otel-collector-gateway.yaml          # ApplicationSet - OTel Collector Deployment gateway → Tempo (wave 6)
 │       └── otel-collector-agent.yaml            # ApplicationSet - OTel Collector DaemonSet agent → gateway (wave 7)
-└── security/
-    └── kyverno/
-        ├── kyverno.yaml                            # ApplicationSet - Kyverno admission controller (wave 3)
-        ├── kyverno-policies.yaml                   # ApplicationSet - ClusterPolicy rules via charts/raw (wave 5)
-        └── policy-reporter.yaml                    # ApplicationSet - Policy Reporter UI (wave 6)
+├── security/
+│   └── kyverno/
+│       ├── kyverno.yaml                            # ApplicationSet - Kyverno admission controller (wave 3)
+│       ├── kyverno-policies.yaml                   # ApplicationSet - ClusterPolicy rules via charts/raw (wave 5)
+│       └── policy-reporter.yaml                    # ApplicationSet - Policy Reporter UI (wave 6)
+├── infrastructure/
+│   ├── README.md                                   # Crossplane install, Pod Identity, activation policy
+│   └── crossplane/
+│       ├── crossplane.yaml                         # ApplicationSet - Crossplane core via Helm (wave 11)
+│       ├── crossplane-providers.yaml               # ApplicationSet - AWS provider packages + runtime configs (wave 12)
+│       ├── crossplane-podmonitor.yaml              # ApplicationSet - PodMonitor for Crossplane metrics (wave 12)
+│       └── crossplane-provider-config.yaml         # ApplicationSet - ClusterProviderConfig + activation policy (wave 13)
+└── ci/
+    ├── README.md                                   # ARC architecture, GitHub App setup, BuildKit guidance
+    └── actions-runner-controller/
+        ├── arc-runner-identity.yaml                # ApplicationSet - GitHub App Secret + runner ServiceAccount (wave 5)
+        ├── actions-runner-controller.yaml          # ApplicationSet - ARC controller (wave 11)
+        └── arc-runner-scale-set.yaml               # ApplicationSet - platform-runners scale set, label-gated (wave 12)
 ```
+
+> `optional/` sits at the **repository root**, not under `gitops/`. The root app
+> recurses `gitops/` in full, so anything placed there is deployed to every
+> cluster - which is exactly what an opt-in integration must not be. See
+> [optional/mlops/README.md](../optional/mlops/README.md).
 
 ---
 
@@ -98,6 +119,7 @@ gitops/
 
 | | |
 |-|-|
+| [app/README.md](app/README.md) | Per-application grouping, why directory layout and AppProject scoping are independent, adding an application |
 | [auto-scaling/README.md](auto-scaling/README.md) | Cluster Autoscaler, Karpenter, NodePool config, metrics-server, HPA |
 | [networking/README.md](networking/README.md) | AWS Load Balancer Controller, ExternalDNS, Ingress annotations |
 | [secrets/README.md](secrets/README.md) | External Secrets Operator, ClusterSecretStore, ExternalSecret mappings, Reloader |
@@ -108,6 +130,8 @@ gitops/
 | [logs/README.md](logs/README.md) | Loki S3 backend, Fluent Bit, Grafana datasource, LogQL queries |
 | [tracing/README.md](tracing/README.md) | OTel Collector agent/gateway pipeline, Tempo S3 backend, trace querying and Loki correlation |
 | [security/README.md](security/README.md) | Kyverno policies, Policy Reporter UI, policy reports |
+| [infrastructure/README.md](infrastructure/README.md) | Crossplane core, AWS providers, EKS Pod Identity, managed resource activation |
+| [ci/README.md](ci/README.md) | Actions Runner Controller, GitHub App credentials, runner ownership split, secure image builds |
 
 ---
 
@@ -221,7 +245,15 @@ Any push to `main` affecting `gitops/` or `charts/` is automatically applied wit
 | alertmanager-slack | monitoring | observability | 9 | AlertmanagerConfig CRD |
 | simple-time-service-alerts | monitoring | observability | 10 | PrometheusRule CRD |
 | thanos | monitoring | observability | 10 | Thanos Query, Compactor, StoreGateway |
+| arc-runner-identity | arc-runners | platform | 5 | GitHub App credentials from Secrets Manager + the `arc-runner` ServiceAccount carrying the ECR IRSA role |
+| crossplane | crossplane-system | crossplane | 11 | Crossplane core + RBAC manager |
+| actions-runner-controller | arc-systems | platform | 11 | GitHub Actions Runner Controller (scale-set architecture) |
+| crossplane-providers | crossplane-system | crossplane | 12 | AWS provider packages (S3, ECR, SQS) + DeploymentRuntimeConfigs |
+| crossplane-podmonitor | crossplane-system | crossplane | 12 | PodMonitor for Crossplane controller metrics |
+| crossplane-provider-config | crossplane-system | crossplane | 13 | ClusterProviderConfig (Pod Identity) + ManagedResourceActivationPolicy |
+| arc-runner-scale-set | arc-runners | platform | 12 | `platform-runners` scale set with a rootless BuildKit sidecar. **Only generated when the cluster secret carries `github-runners=enabled`** |
 | metrics-server | kube-system | platform | — | CPU/memory metrics for HPA |
+| **mlops-platform** | argocd | mlops | — | **Opt-in only.** Second app-of-apps pointing at the separate mlops-platform repo. Not deployed unless `optional/mlops/` is applied by hand |
 
 ---
 
@@ -243,14 +275,43 @@ ArgoCD advances through sync waves sequentially, waiting for all resources in th
 | 8 | SimpleTimeService, Fluent Bit, Grafana datasource + dashboard |
 | 9 | Prometheus Adapter, AlertmanagerConfig |
 | 10 | PrometheusRules, Thanos |
+| 11 | **Crossplane core**, **ARC controller** |
+| 12 | Crossplane AWS providers, Crossplane PodMonitor, **ARC runner scale set** |
+| 13 | Crossplane ProviderConfig + managed resource activation |
 
 > **Note:** The `loki`, `fluent-bit`, `grafana-loki-datasource`, and `simple-time-service-alerts` ApplicationSets previously had their sync-wave annotation only on the inner Application template rather than on the ApplicationSet itself, meaning root-app treated them as wave 0. The annotation is now correctly placed on `metadata.annotations` of each ApplicationSet.
 
 ---
 
+## The one conditional ApplicationSet
+
+Every ApplicationSet here uses the same cluster generator selector, so each one
+produces exactly one Application per registered cluster. `arc-runner-scale-set`
+is the single exception - it selects on a second label:
+
+```yaml
+selector:
+  matchLabels:
+    argocd.argoproj.io/secret-type: cluster
+    github-runners: enabled
+```
+
+`bootstrap.sh` and `upgrade.sh` set that label to `enabled` only when
+`github_config_url` is non-empty. Absent the label, the generator produces no
+Application at all.
+
+The gate exists because an unconfigured ARC *controller* is harmless - it
+connects to nothing - but an unconfigured *scale set* crash-loops its listener
+against the GitHub API indefinitely. Using the generator's own selector keeps it
+out of the deployment path entirely rather than creating an Application that
+would sit Degraded. See
+[design decision #26](../docs/design-decisions.md#26-actions-runner-controller---both-halves-platform-owned).
+
+---
+
 ## ArgoCD Projects
 
-All ApplicationSets are scoped to one of five AppProjects defined in `gitops/argocd/projects/`. Projects enforce which source repos, destination namespaces, and cluster-scoped resource kinds each group of apps is allowed to use - preventing a misconfigured or compromised app from deploying to an unintended namespace or installing arbitrary cluster resources.
+All ApplicationSets are scoped to one of six AppProjects defined in `gitops/argocd/projects/`. A seventh, `mlops`, lives in `optional/mlops/` and exists only when the MLOps integration is enabled. Projects enforce which source repos, destination namespaces, and cluster-scoped resource kinds each group of apps is allowed to use - preventing a misconfigured or compromised app from deploying to an unintended namespace or installing arbitrary cluster resources.
 
 | Project | File | Allowed namespaces | Cluster resources | Covers |
 |---------|------|--------------------|-------------------|--------|
@@ -260,6 +321,8 @@ All ApplicationSets are scoped to one of five AppProjects defined in `gitops/arg
 | `observability` | `observability-project.yaml` | `monitoring`, `logging`, `tracing`, `kube-system` | `CustomResourceDefinition`, `ClusterRole`, `ClusterRoleBinding` | Prometheus, Grafana, Thanos, Loki, Fluent Bit, Tempo, alerts |
 | `security` | `security-project.yaml` | `security` | `CustomResourceDefinition`, `ClusterRole`, `ClusterRoleBinding`, webhooks, `ClusterPolicy` | Kyverno admission controller, ClusterPolicies, Policy Reporter |
 | `workloads` | `workloads-project.yaml` | `simple-time-service` | None | Application workloads |
+| `crossplane` | `crossplane-project.yaml` | `crossplane-system` | Enumerated, not wildcarded - CRDs, cluster RBAC, `pkg.crossplane.io` packages, activation policy, provider configs | Crossplane core, AWS providers, provider credentials |
+| `mlops` | `../../optional/mlops/mlops-project.yaml` | `mlops`, `mlops-system`, `monitoring`, `arc-runners` | `Namespace`, CRDs, `ClusterRole`, `ClusterRoleBinding` - deliberately **no** webhook kinds | **Opt-in only.** The separate mlops-platform repo |
 
 The `bootstrap` project breaks the circular dependency that existed when root-app lived in the `platform` project: root-app managed the platform AppProject, but the platform AppProject governed root-app's permissions. If the platform project became misconfigured, root-app could not reconcile itself out of the problem. With root-app in its own tightly-scoped project, a broken platform project does not affect root-app - and recovering is a single `kubectl apply`.
 
@@ -309,6 +372,11 @@ kubectl top pods -n simple-time-service
 ## Network Policy
 
 Disabled by default. Enabling it requires two steps.
+
+> The optional MLOps platform ships NetworkPolicies that fence the
+> unauthenticated Kubeflow Pipelines API. They are **declared but not
+> enforced** until step 1 below is applied - `NetworkPolicy` objects are
+> accepted by the API server whether or not a controller implements them.
 
 **Step 1 - enable the VPC CNI Network Policy controller** in [terraform/modules/eks/main.tf](../terraform/modules/eks/main.tf):
 

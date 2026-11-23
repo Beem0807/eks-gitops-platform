@@ -51,6 +51,13 @@ spec:
                           for: 1m
                           labels:
                             severity: critical
+                            # On the ALERT, not just on the PrometheusRule's metadata.
+                            # Alertmanager matches alert labels; the metadata label is
+                            # only how the Prometheus Operator selects the rule file.
+                            # The Slack route in gitops/alerts/alertmanager-slack.yaml
+                            # matches notify=slack, so without this the alert fires and
+                            # reaches nobody.
+                            notify: slack
                           annotations:
                             summary: "SimpleTimeService scrape target is down"
                             description: "Prometheus cannot reach the SimpleTimeService metrics endpoint. At least one instance has been unreachable for more than 1 minute."
@@ -69,6 +76,7 @@ spec:
                           for: 5m
                           labels:
                             severity: warning
+                            notify: slack
                           annotations:
                             summary: "SimpleTimeService HPA has been at max replicas for 5 minutes"
                             description: "The HPA for SimpleTimeService has been running at its maximum replica count for more than 5 minutes. Consider raising maxReplicas or investigating sustained high load."

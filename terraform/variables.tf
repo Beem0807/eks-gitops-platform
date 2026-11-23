@@ -144,3 +144,66 @@ variable "enable_karpenter_discovery_tags" {
   type        = bool
   default     = false
 }
+
+variable "github_app_id" {
+  description = "GitHub App ID used by Actions Runner Controller runner scale sets. Leave empty for EKS-only deployments."
+  type        = string
+  default     = ""
+}
+
+variable "github_app_installation_id" {
+  description = "GitHub App installation ID for the org or repositories the runners serve. Leave empty for EKS-only deployments."
+  type        = string
+  default     = ""
+}
+
+variable "github_app_private_key" {
+  description = "PEM-encoded GitHub App private key. Leave empty for EKS-only deployments."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "github_config_url" {
+  description = <<-EOT
+    GitHub organisation or repository the platform runner scale set registers
+    with, e.g. "https://github.com/my-org" for org-wide runners or
+    "https://github.com/my-org/my-repo" for a single repository. Must match the
+    scope the GitHub App is installed on.
+
+    Leave empty to skip deploying the runner scale set entirely - bootstrap.sh
+    gates it on this value, so an EKS-only deployment gets the ARC controller
+    with no runners and nothing that tries to reach GitHub.
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "mlops_github_app_id" {
+  description = <<-DESC
+    App ID of the GitHub App the MLOps ingestion worker pushes with.
+
+    Separate from github_app_id, which is for CI runners. This App needs
+    Contents: Read and write on the MLOps repository and nothing else.
+
+    Optional. Empty means the Secrets Manager entry is still created with empty
+    values, so an EKS-only deployment applies cleanly and the MLOps
+    ExternalSecret stays Healthy if that repository is ever pointed at this
+    cluster. The ingestion worker fails loudly when it tries to push.
+  DESC
+  type        = string
+  default     = ""
+}
+
+variable "mlops_github_app_installation_id" {
+  description = "Installation ID of the MLOps ingestion GitHub App. Optional; see mlops_github_app_id."
+  type        = string
+  default     = ""
+}
+
+variable "mlops_github_app_private_key" {
+  description = "PEM private key of the MLOps ingestion GitHub App. Optional; see mlops_github_app_id."
+  type        = string
+  default     = ""
+  sensitive   = true
+}

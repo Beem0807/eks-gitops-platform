@@ -123,6 +123,23 @@ KARPENTER_INSTANCE_PROFILE_NAME="$(terraform output -raw karpenter_instance_prof
 THANOS_BUCKET_NAME="$(terraform output -raw thanos_bucket_name 2>/dev/null || true)"
 LOKI_BUCKET_NAME="$(terraform output -raw loki_bucket_name 2>/dev/null || true)"
 VELERO_BUCKET_NAME="$(terraform output -raw velero_bucket_name 2>/dev/null || true)"
+# tempo_bucket_name was missing here while gitops/tracing/tempo/tempo.yaml reads
+# the annotation with missingkey=error. Because this script re-applies the whole
+# cluster Secret, omitting an output silently strips its annotation and the
+# ApplicationSet then fails to generate. Every annotation the manifests consume
+# has to be read here.
+TEMPO_BUCKET_NAME="$(terraform output -raw tempo_bucket_name 2>/dev/null || true)"
+MLOPS_PIPELINE_ROLE_ARN="$(terraform output -raw mlops_pipeline_role_arn 2>/dev/null || true)"
+MLOPS_SERVING_ROLE_ARN="$(terraform output -raw mlops_serving_role_arn 2>/dev/null || true)"
+ARC_RUNNER_ROLE_ARN="$(terraform output -raw arc_runner_role_arn 2>/dev/null || true)"
+GITHUB_CONFIG_URL="$(terraform output -raw github_config_url 2>/dev/null || true)"
+
+# Gates the platform runner scale set - see the same block in bootstrap.sh.
+if [[ -n "$GITHUB_CONFIG_URL" ]]; then
+  GITHUB_RUNNERS_LABEL="enabled"
+else
+  GITHUB_RUNNERS_LABEL="disabled"
+fi
 
 echo "Updating kubeconfig..."
 aws eks update-kubeconfig \
@@ -142,6 +159,7 @@ metadata:
     env: dev
     region: ${AWS_REGION}
     cloud: aws
+    github-runners: "${GITHUB_RUNNERS_LABEL}"
   annotations:
     aws-account-id: "${AWS_ACCOUNT_ID}"
     cluster-name: "${CLUSTER_NAME}"
@@ -151,6 +169,11 @@ metadata:
     thanos-bucket-name: "${THANOS_BUCKET_NAME}"
     loki-bucket-name: "${LOKI_BUCKET_NAME}"
     velero-bucket-name: "${VELERO_BUCKET_NAME}"
+    tempo-bucket-name: "${TEMPO_BUCKET_NAME}"
+    mlops-pipeline-role-arn: "${MLOPS_PIPELINE_ROLE_ARN}"
+    mlops-serving-role-arn: "${MLOPS_SERVING_ROLE_ARN}"
+    arc-runner-role-arn: "${ARC_RUNNER_ROLE_ARN}"
+    github-config-url: "${GITHUB_CONFIG_URL}"
 type: Opaque
 stringData:
   name: in-cluster-local
@@ -167,18 +190,13 @@ REFRESH_TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
 echo "Refreshing ExternalSecrets..."
 
-kubectl annotate externalsecret argocd-admin-password \
-  -n argocd \
-  force-sync="${REFRESH_TS}" \
-  --overwrite || true
-
-kubectl annotate externalsecret grafana-admin \
-  -n monitoring \
-  force-sync="${REFRESH_TS}" \
-  --overwrite || true
-
-kubectl annotate externalsecret alertmanager-webhook \
-  -n monitoring \
+# Annotate every ExternalSecret in the cluster rather than an explicit list.
+# Reloader rolls any Deployment whose referenced Secret changes, so a secret
+# that is not refreshed here silently keeps serving the old value until External
+# Secrets' own refreshInterval (1h) comes round. An explicit list goes stale
+# every time a component adds a secret - arc-github-app in arc-runners was
+# missed exactly that way.
+kubectl annotate externalsecret --all --all-namespaces \
   force-sync="${REFRESH_TS}" \
   --overwrite || true
 

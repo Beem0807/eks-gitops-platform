@@ -1,0 +1,186 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: arc-runner-scale-set
+  namespace: argocd
+  annotations:
+    # Wave 12: the controller (wave 11) owns the AutoScalingRunnerSet CRD, and
+    # the listener needs the GitHub App Secret and the runner ServiceAccount
+    # from wave 5.
+    argocd.argoproj.io/sync-wave: "12"
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: ci
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - clusters:
+        # Note the second label. Unlike every other ApplicationSet in this
+        # repository, this one is conditional: it only generates an Application
+        # for a cluster whose secret carries github-runners=enabled, which
+        # bootstrap.sh sets only when github_config_url is non-empty.
+        #
+        # The gate is necessary rather than tidy. An unconfigured controller is
+        # harmless - it talks to nothing - but an unconfigured *scale set* is
+        # not: its listener pod crash-loops against the GitHub API forever. An
+        # EKS-only cluster must not receive one.
+        #
+        # Using the generator's own selector keeps this out of the deployment
+        # path entirely - no Application is created, so there is nothing to show
+        # up Degraded in the UI and nothing to prune later.
+        selector:
+          matchLabels:
+            argocd.argoproj.io/secret-type: cluster
+            github-runners: enabled
+        values:
+          githubConfigUrl: '{{index .metadata.annotations "github-config-url"}}'
+  template:
+    metadata:
+      name: 'arc-runner-scale-set-{{.nameNormalized}}'
+      labels:
+        app.kubernetes.io/part-of: eks-gitops-platform
+        app.kubernetes.io/managed-by: argocd
+        app.kubernetes.io/component: ci
+    spec:
+      project: platform
+      source:
+        repoURL: ghcr.io/actions/actions-runner-controller-charts
+        chart: gha-runner-scale-set
+        targetRevision: 0.15.1
+        helm:
+          # The release name becomes the runner scale set name, which is the
+          # value workflows put in `runs-on`. Renaming this breaks every
+          # workflow that targets it.
+          releaseName: platform-runners
+          values: |
+            githubConfigUrl: '{{ .values.githubConfigUrl }}'
+
+            # Provided by the platform in gitops/ci/.../arc-runner-identity.yaml,
+            # synced from AWS Secrets Manager. Consuming repositories never see
+            # the credential - they only ever reference this name.
+            githubConfigSecret: arc-github-app
+
+            # Required, not optional. The chart creates a RoleBinding granting
+            # the ARC controller access to this namespace, and by default it
+            # discovers the controller's ServiceAccount with a Helm `lookup`
+            # against the live cluster. ArgoCD renders charts without cluster
+            # access, so the lookup returns nil and the chart fails outright
+            # with "No gha-rs-controller deployment found using label
+            # (app.kubernetes.io/part-of=gha-rs-controller)".
+            #
+            # The name is <controller release>-gha-rs-controller, so it is
+            # coupled to the releaseName in actions-runner-controller.yaml -
+            # renaming that release breaks this.
+            controllerServiceAccount:
+              name: arc-gha-rs-controller
+              namespace: arc-systems
+
+            # Scale to zero when idle. The first job after a quiet period waits
+            # for a pod to start, and for a Karpenter node if the cluster has to
+            # grow - a cold start of a minute or two is the trade for not paying
+            # for idle runners.
+            minRunners: 0
+            maxRunners: 5
+
+            template:
+              spec:
+                # Holds the IRSA annotation for ECR push. The chart's own
+                # generated ServiceAccount takes no annotations, so it cannot
+                # carry an AWS identity.
+                serviceAccountName: arc-runner
+
+                # Runners belong on Karpenter workload nodes, not on the core
+                # nodes running the platform control plane. A build that
+                # exhausts memory should take out a disposable workload node,
+                # not the node hosting ArgoCD and Prometheus.
+                nodeSelector:
+                  app: workload
+
+                tolerations:
+                  - key: app
+                    operator: Equal
+                    value: workload
+                    effect: NoSchedule
+
+                containers:
+                  - name: runner
+                    image: ghcr.io/actions/actions-runner:2.338.2
+                    command: ["/home/runner/run.sh"]
+                    env:
+                      # Points docker/build-push-action and buildctl at the
+                      # sidecar below over localhost.
+                      - name: BUILDKIT_HOST
+                        value: tcp://localhost:1234
+                    resources:
+                      requests:
+                        cpu: 500m
+                        memory: 1Gi
+                      limits:
+                        cpu: "2"
+                        memory: 4Gi
+
+                  # Rootless BuildKit for image builds.
+                  #
+                  # Deliberately NOT containerMode: dind, and deliberately no
+                  # hostPath mount of /var/run/docker.sock. The Docker socket is
+                  # a root-equivalent interface to the node: a workflow that
+                  # reaches it can start a privileged container, mount the host
+                  # filesystem, and read every other pod's secrets. On a runner
+                  # that executes pull-request code that is a cluster takeover,
+                  # not a hardening nit. dind is the same exposure in a
+                  # different shape - it needs a privileged container.
+                  #
+                  # Rootless BuildKit needs no privilege and no node access. The
+                  # Unconfined seccomp and AppArmor profiles are required
+                  # because it uses user namespaces and overlayfs inside the
+                  # container; that is a much narrower concession than
+                  # privileged.
+                  - name: buildkitd
+                    image: moby/buildkit:v0.35.0-rootless
+                    args:
+                      - --addr
+                      - tcp://0.0.0.0:1234
+                      - --oci-worker-no-process-sandbox
+                    readinessProbe:
+                      exec:
+                        command: ["buildctl", "debug", "workers"]
+                      initialDelaySeconds: 5
+                      periodSeconds: 30
+                    securityContext:
+                      seccompProfile:
+                        type: Unconfined
+                      appArmorProfile:
+                        type: Unconfined
+                      runAsUser: 1000
+                      runAsGroup: 1000
+                      allowPrivilegeEscalation: false
+                    resources:
+                      requests:
+                        cpu: 500m
+                        memory: 1Gi
+                      limits:
+                        cpu: "2"
+                        memory: 4Gi
+                    volumeMounts:
+                      - name: buildkitd
+                        mountPath: /home/user/.local/share/buildkit
+
+                volumes:
+                  # emptyDir, so the build cache lives and dies with the
+                  # ephemeral runner. A persistent cache would be faster but
+                  # would carry state between jobs - including jobs from
+                  # different pull requests, which is exactly what an ephemeral
+                  # runner exists to prevent.
+                  - name: buildkitd
+                    emptyDir: {}
+      destination:
+        server: '{{.server}}'
+        namespace: arc-runners
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - ServerSideApply=true

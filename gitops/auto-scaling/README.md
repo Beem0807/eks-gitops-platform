@@ -1,6 +1,6 @@
 # Autoscaling
 
-The `gitops/auto-scaling/` directory deploys four ArgoCD apps that together handle node and pod scaling.
+The `gitops/auto-scaling/` directory deploys five ArgoCD apps that together handle node, pod, and event-driven scaling.
 
 | File | What it deploys | Sync wave | Namespace |
 |------|----------------|-----------|-----------|
@@ -8,6 +8,7 @@ The `gitops/auto-scaling/` directory deploys four ArgoCD apps that together hand
 | `karpenter/karpenter.yaml` | Karpenter v1.0.8 controller - provisions workload nodes on demand | 3 | `karpenter` |
 | `karpenter/karpenter-nodepools.yaml` | `EC2NodeClass` + `NodePool` for workload nodes | 4 | `karpenter` |
 | `metrics-server/metrics-server.yaml` | metrics-server v3.12.2 - CPU/memory metrics API required by HPA | — | `kube-system` |
+| `keda/keda.yaml` | KEDA v2.21.0 - event-driven scaling, including scale-to-zero | 11 | `keda` |
 
 Wave ordering ensures the Karpenter controller is running and its admission webhook cert is propagated before the `EC2NodeClass` and `NodePool` CRDs are applied.
 
@@ -173,6 +174,86 @@ kubectl top pods -n simple-time-service
 
 ---
 
+## KEDA
+
+Covers the one case neither the HPA nor Karpenter can: **scaling to and from
+zero based on an external event source**. An HPA needs a metric from a running
+pod, so it cannot scale a workload that should have no pods at all; Karpenter
+scales nodes in response to pods, not pods in response to work.
+
+| Setting | Value |
+|---------|-------|
+| Chart | `keda` v2.21.0 (from `https://kedacore.github.io/charts`) |
+| Namespace | `keda` |
+| Components | operator, metrics API server, admission webhooks |
+| Identity | EKS Pod Identity on the `keda-operator` ServiceAccount |
+| IAM | `<cluster-name>-keda-operator` - `sqs:GetQueueAttributes` only |
+
+### What it scales
+
+Nothing, in an EKS-only cluster. The controller is installed everywhere because
+event-driven autoscaling is a platform capability - the same argument that puts
+Karpenter here - but the `ScaledObject` and `ScaledJob` resources that use it
+belong to the workloads being scaled, in their own repositories.
+
+The MLOps platform uses it for dataset ingestion: a `ScaledJob` in
+`mlops-system` watches the `fraud-detection-ingestion` SQS queue and creates a
+Job when a dataset is uploaded. Datasets arrive days or weeks apart, so steady
+state is zero pods.
+
+### Why not a CronJob
+
+A CronJob costs nothing while idle, but its pickup latency is its schedule
+interval. KEDA's is its polling interval:
+
+| Approach | Idle cost | Pickup latency |
+|----------|-----------|----------------|
+| Deployment with a poll loop | a pod, and the node it blocks from consolidation | seconds |
+| CronJob every 15m | a pod start every 15 minutes | up to 15 minutes |
+| KEDA `ScaledJob` | nothing | ~30s (the polling interval) |
+
+The middle column is why the Deployment loses: a pod idling for a week pins a
+node that Karpenter would otherwise consolidate away, so the cost of waiting is
+a node rather than a pod.
+
+### IAM scope
+
+The operator role reads queue depth and nothing else - no `ReceiveMessage`, no
+`DeleteMessage`. The workload's own role does that, and the workload is what the
+Job runs as. The resource list is the two fraud-detection queues by ARN rather
+than `*`, so a `ScaledObject` in any namespace cannot be used to enumerate the
+depth of unrelated queues, including Karpenter's interruption queue.
+
+Credentials come from Pod Identity, so the chart's ServiceAccount carries **no**
+`eks.amazonaws.com/role-arn` annotation. The association is made in
+`terraform/keda.tf` against the ServiceAccount *name*, which is why
+`serviceAccount.name` is pinned in the Helm values and must not be overridden.
+
+### The scaler gotcha worth knowing
+
+The AWS SQS scaler's `scaleOnInFlight` defaults to **`true`**, which counts
+in-flight (invisible) messages toward queue depth. For a `ScaledJob` that is
+usually wrong: a message stays invisible for the whole visibility timeout while
+its Job processes it, so KEDA keeps seeing depth >= 1 and starts another Job on
+top of the one already running. Any consumer whose work must not overlap needs
+`scaleOnInFlight: "false"`.
+
+Verify the controller is up and a scaler is registered:
+
+```bash
+kubectl get pods -n keda
+kubectl get scaledjobs,scaledobjects -A
+kubectl describe scaledjob fraud-detection-ingestion -n mlops-system
+```
+
+If a scaler is not polling, the operator logs name the reason:
+
+```bash
+kubectl logs -n keda -l app.kubernetes.io/name=keda-operator --tail=100
+```
+
+---
+
 ## HPA
 
 The `simple-time-service` HPA is defined in [charts/simple-time-service/templates/hpa.yaml](../../charts/simple-time-service/templates/hpa.yaml) and **disabled by default** in `values.yaml`. It is enabled via an override in the ApplicationSet:
@@ -218,6 +299,8 @@ kubectl describe hpa simple-time-service -n simple-time-service
 
 | Symptom | Fix |
 |---------|-----|
+| KEDA scaler reports an AWS auth error | The Pod Identity association in `terraform/keda.tf` names the `keda-operator` ServiceAccount. If `serviceAccount.name` was overridden in the Helm values, the association points at a ServiceAccount that does not exist and no credentials are injected - with no error at apply time. |
+| A second ingestion Job starts while one is already running | `scaleOnInFlight` is defaulting to `true`. Set it to `"false"` on the trigger. |
 | `namespace kube-node-lease is not permitted in project 'platform'` on Karpenter sync | Karpenter creates a `RoleBinding` in the `kube-node-lease` namespace so it can delete node `Lease` objects when it terminates nodes. The `platform` AppProject must include `kube-node-lease` as a destination (`gitops/argocd/projects/platform-project.yaml`). |
 
 For operational incidents see the runbooks:

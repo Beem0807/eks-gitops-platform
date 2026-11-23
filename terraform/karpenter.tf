@@ -22,6 +22,10 @@ module "karpenter" {
 
   tags = merge(
     local.common_tags,
+    # Applies to the interruption queue, putting it behind the Crossplane deny
+    # in crossplane.tf. Also lands on the module's IAM resources, which is
+    # harmless - the Crossplane roles hold no IAM permissions at all.
+    local.crossplane_denied_tags,
     {
       "karpenter.sh/discovery" = var.cluster_name
     }

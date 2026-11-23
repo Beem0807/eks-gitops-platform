@@ -64,7 +64,7 @@ labels:
   severity: critical   # or warning
 ```
 
-Check `gitops/alerts/simple-time-service-alerts.yaml` as a reference - both alerts there include `notify: slack`.
+Check `gitops/app/simple-time-service/simple-time-service-alerts.yaml` as a reference - both alerts there include `notify: slack`.
 
 ### Webhook secret missing or stale
 ```bash

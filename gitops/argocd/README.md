@@ -29,6 +29,7 @@ AppProjects are the primary security boundary in ArgoCD. Each project defines:
 | `observability` | Observability stack - Prometheus, Grafana, Thanos, Loki, Fluent Bit | CRDs, ClusterRoles, webhooks, APIService |
 | `security` | Policy enforcement - Kyverno admission controller and ClusterPolicy rules | CRDs, ClusterRoles/Bindings, webhooks, `ClusterPolicy` |
 | `workloads` | Application workloads | None (`[]`) |
+| `crossplane` | Crossplane control plane - core install, AWS provider packages, provider credentials, managed resource activation | Explicit list (CRDs, ClusterRoles/Bindings, `pkg.crossplane.io` packages, activation policy, provider configs) |
 
 ### Least-privilege design
 
@@ -41,6 +42,7 @@ platform      →  */*                 (CRDs, ClusterRoles, webhooks - infra too
 observability →  explicit list       (CRDs, ClusterRoles, webhooks, APIService for Prometheus stack)
 security      →  explicit list       (CRDs, ClusterRoles, webhooks, ClusterPolicy - Kyverno needs all four)
 workloads     →  [] cluster access   (Deployments, Services, etc. - all namespace-scoped)
+crossplane    →  explicit list       (CRDs, ClusterRoles, pkg.crossplane.io packages, ClusterProviderConfig)
 ```
 
 The `workloads` project's `namespaceResourceWhitelist` is an explicit allowlist of namespace-scoped kinds workload charts are permitted to create, preventing a compromised workload from creating arbitrary resources (e.g. ClusterRoleBindings via a rogue Helm chart).
@@ -87,3 +89,19 @@ Root-app discovers all YAML files under `gitops/` recursively. Sync wave annotat
 | 8 | Workloads, Grafana dashboards, Fluent Bit |
 | 9 | Prometheus Adapter, Alertmanager Slack |
 | 10 | Thanos, alert rules |
+
+---
+
+## Projects not in this directory
+
+One AppProject deliberately lives outside `gitops/argocd/projects/`:
+
+| Project | Location | Why |
+|---------|----------|-----|
+| `mlops` | [`optional/mlops/mlops-project.yaml`](../../optional/mlops/mlops-project.yaml) | The MLOps integration is opt-in. `bootstrap.sh` applies this whole directory, so a project placed here would exist on every cluster - including EKS-only ones |
+
+It is applied by hand alongside the Application it scopes - see
+[optional/mlops/README.md](../../optional/mlops/README.md).
+
+The `crossplane` project *is* in this directory, because Crossplane is part of
+the mandatory platform rather than an opt-in add-on.

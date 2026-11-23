@@ -59,6 +59,24 @@ spec:
               - name: simple-time-service
               - name: security
               - name: tracing
+
+              # Crossplane core, the AWS providers, and their ProviderConfig.
+              - name: crossplane-system
+
+              # Actions Runner Controller. Split in two because the ownership
+              # boundary is different: the platform owns the controller in
+              # arc-systems, while consuming projects own the runner scale sets
+              # in arc-runners. Keeping runners out of the controller namespace
+              # means a project can be granted RBAC on its runners without
+              # being granted anything over the controller.
+              - name: arc-systems
+              - name: arc-runners
+
+              # KEDA. Only the controller lives here - ScaledObjects and
+              # ScaledJobs are namespaced alongside the workload they scale,
+              # which for MLOps means the mlops-system namespace in the MLOps
+              # repository.
+              - name: keda
       destination:
         server: '{{.server}}'
         namespace: argocd

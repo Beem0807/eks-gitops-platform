@@ -1,0 +1,101 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: crossplane
+  namespace: argocd
+  annotations:
+    # Wave 11: after the whole existing platform is healthy. Nothing in waves
+    # -1..10 depends on Crossplane, so installing it last keeps it out of the
+    # critical path of a cluster bootstrap - a broken Crossplane install cannot
+    # stop Prometheus or the ingress controller from coming up.
+    argocd.argoproj.io/sync-wave: "11"
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: crossplane
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            argocd.argoproj.io/secret-type: cluster
+  template:
+    metadata:
+      name: 'crossplane-{{.nameNormalized}}'
+      labels:
+        app.kubernetes.io/part-of: eks-gitops-platform
+        app.kubernetes.io/managed-by: argocd
+        app.kubernetes.io/component: crossplane
+    spec:
+      project: crossplane
+      source:
+        repoURL: https://charts.crossplane.io/stable
+        chart: crossplane
+        targetRevision: 2.4.3
+        helm:
+          releaseName: crossplane
+          values: |
+            # Crossplane core and its RBAC manager run on core nodes alongside
+            # the rest of the platform control plane.
+            nodeSelector:
+              app: core
+
+            tolerations:
+              - key: app
+                operator: Equal
+                value: core
+                effect: NoSchedule
+
+            rbacManager:
+              deploy: true
+              nodeSelector:
+                app: core
+              tolerations:
+                - key: app
+                  operator: Equal
+                  value: core
+                  effect: NoSchedule
+
+            # Providers and Functions are installed as separate ArgoCD
+            # Applications (wave 12) rather than through these chart values, so
+            # that sync waves can order the ProviderConfig and the XRDs after
+            # the provider packages are actually healthy. Installing them here
+            # would make them part of this release and lose that ordering.
+            provider:
+              packages: []
+              # Empty on purpose. Crossplane 2.x only serves managed resource
+              # CRDs that a ManagedResourceActivationPolicy activates. The
+              # default "*" would activate every one of the ~2,100 CRDs the AWS
+              # provider family ships, which is a large and permanent cost in
+              # API server memory and watch churn for the eight kinds this
+              # platform actually composes. The explicit policy lives in
+              # crossplane-provider-config.yaml.
+              defaultActivations: []
+
+            function:
+              packages: []
+
+            configuration:
+              packages: []
+
+            resourcesCrossplane:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 500m
+                memory: 1Gi
+
+            metrics:
+              enabled: true
+      destination:
+        server: '{{.server}}'
+        namespace: crossplane-system
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - ServerSideApply=true

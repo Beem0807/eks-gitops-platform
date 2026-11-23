@@ -1,0 +1,116 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: crossplane-provider-config
+  namespace: argocd
+  annotations:
+    # Wave 13: the ClusterProviderConfig type is owned by the AWS family
+    # provider and the activation policy targets managed resource definitions
+    # the service providers register, so both must be installed (wave 12) first.
+    argocd.argoproj.io/sync-wave: "13"
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: crossplane
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            argocd.argoproj.io/secret-type: cluster
+  template:
+    metadata:
+      name: 'crossplane-provider-config-{{.nameNormalized}}'
+      labels:
+        app.kubernetes.io/part-of: eks-gitops-platform
+        app.kubernetes.io/managed-by: argocd
+        app.kubernetes.io/component: crossplane
+    spec:
+      project: crossplane
+      source:
+        repoURL: https://github.com/Beem0807/eks-gitops-platform.git
+        targetRevision: main
+        path: charts/raw
+        helm:
+          releaseName: crossplane-provider-config
+          values: |
+            resources:
+
+              # ── AWS credentials ─────────────────────────────────────────────
+              # source: PodIdentity makes each provider pod read credentials
+              # from the EKS Pod Identity Agent, which resolves them against the
+              # pod's ServiceAccount. One config therefore yields three
+              # different AWS identities - provider-aws-s3 gets the S3 role,
+              # provider-aws-ecr the ECR role, provider-aws-sqs the SQS role -
+              # because the identity comes from the pod, not from this object.
+              #
+              # There are no credentials in this manifest and no Secret to
+              # rotate; the mapping lives in terraform/crossplane.tf as
+              # aws_eks_pod_identity_association resources.
+              #
+              # ClusterProviderConfig rather than the namespaced ProviderConfig:
+              # it is cluster-scoped, so claims in any namespace resolve it
+              # without the platform having to seed a ProviderConfig into every
+              # namespace that wants a bucket.
+              - apiVersion: aws.m.upbound.io/v1beta1
+                kind: ClusterProviderConfig
+                metadata:
+                  name: default
+                  labels:
+                    app.kubernetes.io/part-of: eks-gitops-platform
+                    app.kubernetes.io/component: crossplane
+                spec:
+                  credentials:
+                    source: PodIdentity
+
+              # ── Managed resource activation ─────────────────────────────────
+              # Crossplane 2.x serves a provider's managed resource CRDs only
+              # when an activation policy names them. The AWS provider family
+              # ships roughly 2,100 managed resource types; activating all of
+              # them costs API server memory and an informer per type, forever,
+              # for types nothing in this platform uses.
+              #
+              # This policy activates the four service groups the platform
+              # supports, and nothing else. Wildcards are used rather than an
+              # explicit list of kinds so that consuming projects can use any
+              # resource type within S3, ECR, and SQS - including the
+              # sub-resources such as BucketVersioning and LifecyclePolicy -
+              # without a platform change. That is around 60 CRDs rather than
+              # 2,100.
+              #
+              # Only the namespaced variants (*.aws.m.upbound.io) are
+              # activated. The cluster-scoped variants (*.aws.upbound.io) are
+              # left inactive so that every Crossplane resource in the cluster
+              # lives in a namespace and is therefore governed by that
+              # namespace's RBAC.
+              #
+              # Adding a fourth AWS service means installing its provider in
+              # crossplane-providers.yaml, granting it a role in
+              # terraform/crossplane.tf, and adding its group here. Without the
+              # entry its CRDs are never served and manifests fail with "no
+              # matches for kind".
+              - apiVersion: apiextensions.crossplane.io/v1alpha1
+                kind: ManagedResourceActivationPolicy
+                metadata:
+                  name: platform-managed-resources
+                  labels:
+                    app.kubernetes.io/part-of: eks-gitops-platform
+                    app.kubernetes.io/component: crossplane
+                spec:
+                  activate:
+                    - "*.s3.aws.m.upbound.io"
+                    - "*.ecr.aws.m.upbound.io"
+                    - "*.sqs.aws.m.upbound.io"
+                    # EventBridge, for the S3 -> SQS dataset ingestion hop.
+                    - "*.cloudwatchevents.aws.m.upbound.io"
+      destination:
+        server: '{{.server}}'
+        namespace: crossplane-system
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - ServerSideApply=true

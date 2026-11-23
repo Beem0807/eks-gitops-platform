@@ -1,0 +1,63 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: crossplane
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: crossplane
+spec:
+  description: Crossplane control plane - core install, AWS provider packages, provider credentials, and managed resource activation
+
+  sourceRepos:
+    # Crossplane core Helm chart
+    - https://charts.crossplane.io/stable
+    # GitOps repo (provider packages, ProviderConfig, activation policy, PodMonitor via charts/raw)
+    - https://github.com/Beem0807/eks-gitops-platform.git
+
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: crossplane-system
+
+  # Crossplane is an API-extension control plane, so it is cluster-scoped by
+  # nature. The resources below are enumerated rather than wildcarded - unlike
+  # the platform project, which uses */* - because this project's membership is
+  # small and stable enough to list, and listing it makes the blast radius
+  # legible: these apps can install packages and provider credentials, and they
+  # cannot create a Namespace, a ClusterRoleBinding, or a webhook.
+  #
+  # The managed resource CRDs the providers register are created by the
+  # Crossplane package manager, not by ArgoCD, so they do not need to appear
+  # here.
+  clusterResourceWhitelist:
+    # Crossplane's own CRDs, installed by the core Helm chart
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+    # Core chart RBAC and the RBAC manager's aggregated roles
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+    # Package manager objects
+    - group: pkg.crossplane.io
+      kind: Provider
+    - group: pkg.crossplane.io
+      kind: Function
+    - group: pkg.crossplane.io
+      kind: Configuration
+    - group: pkg.crossplane.io
+      kind: DeploymentRuntimeConfig
+    - group: pkg.crossplane.io
+      kind: ImageConfig
+    # Which managed resource CRDs are served
+    - group: apiextensions.crossplane.io
+      kind: ManagedResourceActivationPolicy
+    # AWS credentials for the provider pods
+    - group: aws.m.upbound.io
+      kind: ClusterProviderConfig
+    - group: aws.upbound.io
+      kind: ProviderConfig
+
+  orphanedResources:
+    warn: true

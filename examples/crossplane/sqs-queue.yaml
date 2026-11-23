@@ -1,0 +1,104 @@
+# Example: an SQS queue with a dead-letter queue, for asynchronous inference or
+# training job handoff.
+#
+# Not deployed by anything - see examples/crossplane/README.md.
+#
+# Replace 111122223333 with the target AWS account ID before using this. See
+# the note on the QueueRedrivePolicy below for why it cannot be a reference.
+---
+# The dead-letter queue, declared first because the redrive policy points at it.
+#
+# A queue without a DLQ silently drops messages that fail repeatedly, which on
+# an inference queue means losing exactly the requests that would show a model
+# is broken.
+apiVersion: sqs.aws.m.upbound.io/v1beta1
+kind: Queue
+metadata:
+  name: inference-jobs-dlq
+  namespace: mlops
+spec:
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: default
+  forProvider:
+    name: inference-jobs-dlq
+    region: ap-south-1
+    # SQS-managed encryption: encrypted at rest with no KMS key to provision,
+    # no key policy to maintain, and no per-request KMS charge. Queues are
+    # unencrypted unless asked.
+    sqsManagedSseEnabled: true
+    # 14 days, the maximum. Failed messages are the ones worth keeping longest.
+    messageRetentionSeconds: 1209600
+    tags:
+      Name: inference-jobs-dlq
+      Workload: mlops
+
+---
+apiVersion: sqs.aws.m.upbound.io/v1beta1
+kind: Queue
+metadata:
+  name: inference-jobs
+  namespace: mlops
+  labels:
+    # Selected by the QueueRedrivePolicy below.
+    queue: inference-jobs
+spec:
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: default
+  forProvider:
+    name: inference-jobs
+    region: ap-south-1
+    sqsManagedSseEnabled: true
+    # Must exceed the worst-case processing time of the consumer. Set it too
+    # low and SQS redelivers a message that is still being worked on, so the
+    # same inference runs twice.
+    visibilityTimeoutSeconds: 300
+    # 4 days.
+    messageRetentionSeconds: 345600
+    # Long polling. At 0, consumers burn request charges on empty receives and
+    # add latency; 20s is the maximum and almost always the right value.
+    receiveWaitTimeSeconds: 20
+    maxMessageSize: 262144
+    tags:
+      Name: inference-jobs
+      Workload: mlops
+
+---
+# Redrive policy, attached as a separate resource.
+#
+# It is not set inline on the Queue above because `redrivePolicy` is a JSON
+# string and the DLQ's ARN is not known until the DLQ exists. Splitting it out
+# lets Crossplane resolve the *queue* by label rather than by URL, so only the
+# DLQ ARN has to be written literally.
+#
+# That ARN genuinely cannot be a reference - the provider offers
+# queueUrlRef/queueUrlSelector for the queue being configured, but nothing for
+# an ARN embedded inside a JSON string field. Upstream's own example carries the
+# annotation "It requires a real queue arn to be specified". SQS ARNs are
+# deterministic (arn:aws:sqs:<region>:<account>:<name>), so this is predictable
+# rather than discovered - it just has to be filled in.
+apiVersion: sqs.aws.m.upbound.io/v1beta1
+kind: QueueRedrivePolicy
+metadata:
+  name: inference-jobs-redrive
+  namespace: mlops
+spec:
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: default
+  forProvider:
+    region: ap-south-1
+    # Resolved to the primary queue's URL by Crossplane. The QueueRedrivePolicy
+    # stays not-Ready until the Queue it selects is Ready.
+    queueUrlSelector:
+      matchLabels:
+        queue: inference-jobs
+    # maxReceiveCount is the number of delivery attempts before a message is
+    # moved to the DLQ. Too low and a transient error loses work; too high and
+    # a genuinely poisoned message is retried for a long time first.
+    redrivePolicy: |
+      {
+        "deadLetterTargetArn": "arn:aws:sqs:ap-south-1:111122223333:inference-jobs-dlq",
+        "maxReceiveCount": 5
+      }

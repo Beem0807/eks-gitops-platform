@@ -432,6 +432,62 @@ except Exception:
     issues=$((issues + 1))
   fi
 
+  # Crossplane-managed leftovers. These are the dangerous orphans: nothing in
+  # Terraform state refers to them, so the check above cannot see them, and an
+  # S3 bucket name that is still taken breaks the next bootstrap outright.
+  echo "Checking for orphaned Crossplane-managed resources..."
+  local orphan_buckets orphan_queues orphan_repos crossplane_orphans=0
+
+  orphan_buckets="$(aws resourcegroupstaggingapi get-resources \
+    --region "$AWS_REGION" \
+    --tag-filters "Key=ManagedBy,Values=crossplane" \
+    --resource-type-filters "s3" \
+    --query "ResourceTagMappingList[].ResourceARN" \
+    --output text 2>/dev/null || true)"
+  orphan_queues="$(aws resourcegroupstaggingapi get-resources \
+    --region "$AWS_REGION" \
+    --tag-filters "Key=ManagedBy,Values=crossplane" \
+    --resource-type-filters "sqs" \
+    --query "ResourceTagMappingList[].ResourceARN" \
+    --output text 2>/dev/null || true)"
+  orphan_repos="$(aws resourcegroupstaggingapi get-resources \
+    --region "$AWS_REGION" \
+    --tag-filters "Key=ManagedBy,Values=crossplane" \
+    --resource-type-filters "ecr" \
+    --query "ResourceTagMappingList[].ResourceARN" \
+    --output text 2>/dev/null || true)"
+
+  for arn in $orphan_buckets $orphan_queues $orphan_repos; do
+    [[ -z "$arn" || "$arn" == "None" ]] && continue
+    echo "  WARNING: orphaned Crossplane resource: $arn"
+    crossplane_orphans=$((crossplane_orphans + 1))
+  done
+
+  if [[ "$crossplane_orphans" -eq 0 ]]; then
+    echo "  OK: no resources tagged ManagedBy=crossplane remain."
+  else
+    echo "  $crossplane_orphans orphan(s). These still bill, and a leftover S3"
+    echo "  bucket name will make the next bootstrap fail - bucket names are"
+    echo "  globally unique. Delete them by hand."
+    issues=$((issues + crossplane_orphans))
+  fi
+
+  # The GitHub App secrets are Terraform-managed with recovery_window 0, so
+  # destroy removes them immediately rather than scheduling them. Confirmed
+  # here because a secret left *scheduled* for deletion keeps its name
+  # reserved, and the next bootstrap then fails to create it.
+  echo "Checking GitHub App secrets were removed..."
+  for secret_name in arc-github-app mlops-ingestion-github-app; do
+    if aws secretsmanager describe-secret \
+        --secret-id "$secret_name" \
+        --region "$AWS_REGION" >/dev/null 2>&1; then
+      echo "  WARNING: Secrets Manager entry $secret_name still exists."
+      issues=$((issues + 1))
+    else
+      echo "  OK: $secret_name removed."
+    fi
+  done
+
   echo ""
   if [[ "$issues" -eq 0 ]]; then
     echo "Verification passed: all resources cleaned up successfully."
@@ -522,6 +578,195 @@ _force_remove_namespace_finalizers() {
           --type=merge \
           -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true
       done
+}
+
+# ---------------------------------------------------------------------------
+# Crossplane-managed AWS resources
+#
+# These are NOT in Terraform state. Terraform created the cluster; Crossplane
+# running inside that cluster created the S3 buckets, ECR repositories, SQS
+# queues and EventBridge rules that consuming projects declared. So
+# `terraform destroy` does not touch them, and destroying the cluster first
+# removes the only thing that knows they exist.
+#
+# The result of getting this wrong is not a tidy-up problem. S3 bucket names
+# are globally unique, so an orphaned bucket means the next bootstrap of this
+# platform FAILS to create it - and the orphan keeps billing in the meantime.
+#
+# Hence: this runs FIRST, before any controller is scaled down, and it waits
+# for Crossplane to confirm deletion rather than assuming it.
+#
+# Nothing here hardcodes a consuming project's resource names. Crossplane gives
+# every managed resource CRD the `managed` category, so the set is discovered
+# from the cluster. That keeps this platform repository free of knowledge about
+# what any particular consumer declared.
+# ---------------------------------------------------------------------------
+
+MLOPS_WAIT_SECONDS="${MLOPS_WAIT_SECONDS:-300}"
+
+_crossplane_present() {
+  kubectl get crd providerconfigs.aws.upbound.io >/dev/null 2>&1 \
+    || kubectl get crd managedresourceactivationpolicies.apiextensions.crossplane.io >/dev/null 2>&1
+}
+
+# Bucket names, read from the Bucket managed resources themselves. The AWS name
+# is the external-name annotation when set, otherwise metadata.name.
+_crossplane_bucket_names() {
+  kubectl get buckets.s3.aws.m.upbound.io,buckets.s3.aws.upbound.io \
+    -A -o json 2>/dev/null \
+    | python3 -c '
+import sys, json
+try:
+    doc = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for item in doc.get("items", []):
+    ann = (item.get("metadata") or {}).get("annotations") or {}
+    name = ann.get("crossplane.io/external-name") or item["metadata"]["name"]
+    print(name)
+' 2>/dev/null || true
+}
+
+_empty_bucket_completely() {
+  local bucket="$1"
+
+  if ! aws s3api head-bucket --bucket "$bucket" --region "$AWS_REGION" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "    Emptying $bucket (versions and delete markers)..."
+  # Versioning is on for these buckets, so plain `aws s3 rm --recursive` leaves
+  # every noncurrent version behind and the bucket still refuses to delete.
+  for selector in "Versions" "DeleteMarkers"; do
+    while true; do
+      local payload count
+      payload="$(aws s3api list-object-versions \
+        --bucket "$bucket" \
+        --region "$AWS_REGION" \
+        --query "{Objects: ${selector}[].{Key:Key,VersionId:VersionId}}" \
+        --max-items 1000 \
+        --output json 2>/dev/null || true)"
+
+      count="$(echo "$payload" \
+        | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('Objects') or []))" 2>/dev/null || echo 0)"
+
+      [[ "$count" == "0" ]] && break
+
+      echo "$payload" | aws s3api delete-objects \
+        --bucket "$bucket" \
+        --region "$AWS_REGION" \
+        --delete file:///dev/stdin \
+        --output text >/dev/null 2>&1 || break
+    done
+  done
+}
+
+cleanup_crossplane_managed_resources() {
+  if [[ -z "$CLUSTER_NAME" || -z "$AWS_REGION" ]]; then
+    echo "Terraform outputs not available. Skipping Crossplane resource cleanup."
+    return 0
+  fi
+
+  aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER_NAME" >/dev/null 2>&1 || true
+
+  if ! kubectl cluster-info --request-timeout=15s >/dev/null 2>&1; then
+    echo "WARNING: cluster unreachable - cannot delete Crossplane-managed AWS resources."
+    echo "         If this platform ever ran a project that declared S3 buckets,"
+    echo "         ECR repositories, SQS queues or EventBridge rules through"
+    echo "         Crossplane, THEY ARE NOW ORPHANED and still billing."
+    echo "         Check for resources tagged ManagedBy=crossplane."
+    return 0
+  fi
+
+  if ! _crossplane_present; then
+    echo "Crossplane is not installed. Nothing to clean up."
+    return 0
+  fi
+
+  local count
+  count="$(kubectl get managed -A --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+  if [[ "$count" == "0" ]]; then
+    echo "No Crossplane managed resources present."
+    return 0
+  fi
+
+  echo "Found $count Crossplane-managed AWS resource(s). Deleting before cluster teardown."
+  kubectl get managed -A --no-headers 2>/dev/null | awk '{print "    " $0}' | head -40 || true
+
+  # Stop ArgoCD re-creating what is about to be deleted. Only the consuming
+  # projects' Applications are removed, selected by their AppProject rather
+  # than by name - the platform's own Applications are left alone because this
+  # function runs before the platform teardown.
+  echo "  Removing ArgoCD Applications that would re-sync these resources..."
+  for project in mlops; do
+    kubectl delete applications.argoproj.io -n "$ARGOCD_NS" \
+      -l "argocd.argoproj.io/instance" \
+      --field-selector "spec.project=$project" \
+      --ignore-not-found=true --wait=false >/dev/null 2>&1 || true
+    # ApplicationSets regenerate Applications, so they go first in practice;
+    # field-selector on spec.project is not supported for ApplicationSets, so
+    # these are matched on the label the templates set.
+    kubectl delete applicationsets.argoproj.io -n "$ARGOCD_NS" \
+      -l "app.kubernetes.io/part-of=${project}-platform" \
+      --ignore-not-found=true --wait=false >/dev/null 2>&1 || true
+  done
+
+  # S3 buckets must be empty before AWS will delete them, and Crossplane does
+  # not empty them for you - the Bucket resource just stays Deleting forever
+  # with a BucketNotEmpty error in its conditions.
+  local buckets
+  buckets="$(_crossplane_bucket_names)"
+  if [[ -n "$buckets" ]]; then
+    echo "  Emptying Crossplane-managed buckets first..."
+    while IFS= read -r bucket; do
+      [[ -z "$bucket" ]] && continue
+      _empty_bucket_completely "$bucket"
+    done <<< "$buckets"
+  fi
+
+  echo "  Deleting managed resources..."
+  kubectl delete managed -A --all --wait=false >/dev/null 2>&1 || true
+
+  echo "  Waiting up to ${MLOPS_WAIT_SECONDS}s for Crossplane to delete them in AWS..."
+  local deadline=$((SECONDS + MLOPS_WAIT_SECONDS))
+  local remaining
+  while (( SECONDS < deadline )); do
+    remaining="$(kubectl get managed -A --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+    if [[ "$remaining" == "0" ]]; then
+      echo "  All Crossplane-managed AWS resources deleted."
+      return 0
+    fi
+    sleep 10
+  done
+
+  # Timed out. Strip finalizers so the namespace teardown is not blocked, but
+  # be explicit that this ORPHANS whatever is left - removing the finalizer
+  # tells Kubernetes the resource is gone, not AWS.
+  echo
+  echo "  WARNING: $remaining managed resource(s) did not finish deleting."
+  kubectl get managed -A --no-headers 2>/dev/null | awk '{print "    " $0}' || true
+  echo
+  echo "  Removing their finalizers so the cluster teardown can proceed."
+  echo "  THIS DOES NOT DELETE THEM IN AWS. Check manually for resources"
+  echo "  tagged ManagedBy=crossplane, in particular S3 buckets - a leftover"
+  echo "  bucket name will make the next bootstrap fail."
+  echo
+
+  local kinds
+  kinds="$(kubectl api-resources --categories=managed -o name 2>/dev/null | tr '\n' ' ')"
+  for kind in $kinds; do
+    kubectl get "$kind" -A --no-headers -o custom-columns=NS:.metadata.namespace,N:.metadata.name 2>/dev/null \
+      | while read -r ns name; do
+          [[ -z "$name" ]] && continue
+          if [[ "$ns" == "<none>" || -z "$ns" ]]; then
+            kubectl patch "$kind" "$name" --type=merge \
+              -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true
+          else
+            kubectl patch "$kind" "$name" -n "$ns" --type=merge \
+              -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true
+          fi
+        done
+  done
 }
 
 cleanup_kubernetes_resources() {
@@ -1028,6 +1273,11 @@ print(next((t['Value'] for t in tags if 'velero' in t['Key'].lower()), ''))
     fi
   done
 }
+
+# FIRST, before anything is scaled down. Crossplane has to be alive and
+# reconciling to delete the AWS resources it owns, and ArgoCD has to be alive
+# to stop re-creating them. cleanup_kubernetes_resources below kills both.
+cleanup_crossplane_managed_resources
 
 cleanup_kubernetes_resources
 cleanup_karpenter_ec2_instances

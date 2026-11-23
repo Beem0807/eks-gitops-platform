@@ -42,3 +42,23 @@ output "velero_bucket_name" {
 output "tempo_bucket_name" {
   value = aws_s3_bucket.tempo.bucket
 }
+
+output "mlops_pipeline_role_arn" {
+  description = "IRSA role for MLOps pipeline workloads (mlops-system, kubeflow) - S3 and SQS read/write"
+  value       = aws_iam_role.mlops_pipeline.arn
+}
+
+output "mlops_serving_role_arn" {
+  description = "IRSA role for KServe predictors (mlops) - S3 read-only"
+  value       = aws_iam_role.mlops_serving.arn
+}
+
+output "arc_runner_role_arn" {
+  description = "IRSA role assumed by GitHub Actions runner pods"
+  value       = aws_iam_role.arc_runner.arn
+}
+
+output "github_config_url" {
+  description = "GitHub org or repo the platform runner scale set registers with. Empty disables the scale set."
+  value       = var.github_config_url
+}

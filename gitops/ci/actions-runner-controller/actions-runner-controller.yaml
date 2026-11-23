@@ -1,0 +1,107 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: actions-runner-controller
+  namespace: argocd
+  annotations:
+    # Wave 11: nothing in the existing platform depends on ARC, so it installs
+    # after the platform is healthy. Runner scale sets, which consuming projects
+    # own, come later still - they are separate Applications in separate repos.
+    argocd.argoproj.io/sync-wave: "11"
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: ci
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            argocd.argoproj.io/secret-type: cluster
+  template:
+    metadata:
+      name: 'actions-runner-controller-{{.nameNormalized}}'
+      labels:
+        app.kubernetes.io/part-of: eks-gitops-platform
+        app.kubernetes.io/managed-by: argocd
+        app.kubernetes.io/component: ci
+    spec:
+      project: platform
+      source:
+        # gha-runner-scale-set-controller is the current ARC architecture
+        # (autoscaling runner scale sets), not the older RunnerDeployment
+        # controller. The two are separate products that happen to share the
+        # "actions-runner-controller" name; only this one supports the
+        # ephemeral, GitHub-managed scale sets configured below.
+        repoURL: ghcr.io/actions/actions-runner-controller-charts
+        chart: gha-runner-scale-set-controller
+        targetRevision: 0.15.1
+        helm:
+          releaseName: arc
+          values: |
+            replicaCount: 1
+
+            serviceAccount:
+              create: true
+
+            nodeSelector:
+              app: core
+
+            tolerations:
+              - key: app
+                operator: Equal
+                value: core
+                effect: NoSchedule
+
+            # The chart mounts an emptyDir at /tmp, so a read-only root
+            # filesystem is safe here.
+            podSecurityContext:
+              runAsNonRoot: true
+              runAsUser: 1000
+              fsGroup: 1000
+
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop:
+                  - ALL
+
+            resources:
+              requests:
+                cpu: 100m
+                memory: 128Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+
+            flags:
+              # The chart default is debug, which is far too noisy to ship to
+              # Loki continuously.
+              logLevel: info
+              logFormat: json
+
+              # watchSingleNamespace is deliberately left unset. The controller
+              # watches all namespaces so that each consuming project can own a
+              # runner scale set without the platform having to redeploy the
+              # controller for every new one.
+
+            metrics:
+              controllerManagerAddr: ":8080"
+              listenerAddr: ":8080"
+              listenerEndpoint: "/metrics"
+      destination:
+        server: '{{.server}}'
+        namespace: arc-systems
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          # Required, not just conventional. The AutoScalingRunnerSet CRD alone
+          # is ~1.2 MB, and client-side apply stores the whole manifest in the
+          # kubectl.kubernetes.io/last-applied-configuration annotation, which
+          # is capped at 256 KB. These CRDs can only be applied server-side.
+          - ServerSideApply=true

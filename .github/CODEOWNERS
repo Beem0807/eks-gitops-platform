@@ -14,3 +14,9 @@ app/                        @Beem0807
 gitops/                     @Beem0807
 k8s/                        @Beem0807
 charts/                     @Beem0807
+
+# Opt-in add-ons - applying these changes what runs on the cluster
+optional/                   @Beem0807
+
+# Reference manifests - not deployed, but copied into consuming repositories
+examples/                   @Beem0807

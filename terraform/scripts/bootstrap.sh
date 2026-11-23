@@ -72,6 +72,50 @@ if [[ -z "${TF_VAR_alertmanager_slack_webhook_url:-}" ]]; then
   exit 1
 fi
 
+# GitHub App credentials, checked here rather than discovered later.
+#
+# Both Secrets Manager entries are created unconditionally with empty values,
+# so Terraform and the ExternalSecrets succeed either way. The failure only
+# shows up at runtime, and it shows up badly: a runner scale set listener
+# crash-loops against the GitHub API, and the ingestion worker fails its push
+# after already downloading a dataset. Neither error says "you forgot a
+# variable".
+#
+# So: if the feature is switched on, require its credentials now.
+
+if [[ -n "${TF_VAR_github_config_url:-}" ]]; then
+  MISSING_ARC=()
+  [[ -z "${TF_VAR_github_app_id:-}" ]] && MISSING_ARC+=("TF_VAR_github_app_id")
+  [[ -z "${TF_VAR_github_app_installation_id:-}" ]] && MISSING_ARC+=("TF_VAR_github_app_installation_id")
+  [[ -z "${TF_VAR_github_app_private_key:-}" ]] && MISSING_ARC+=("TF_VAR_github_app_private_key")
+
+  if [[ ${#MISSING_ARC[@]} -gt 0 ]]; then
+    echo "ERROR: TF_VAR_github_config_url is set, so a runner scale set will be"
+    echo "       deployed, but these are missing:"
+    printf '         %s\n' "${MISSING_ARC[@]}"
+    echo
+    echo "       The listener cannot authenticate without them and will"
+    echo "       crash-loop. Either supply them, or unset"
+    echo "       TF_VAR_github_config_url to install the ARC controller alone."
+    exit 1
+  fi
+  echo "ARC GitHub App credentials present."
+fi
+
+# The MLOps App is a warning rather than an error: this repository does not
+# know whether the separate mlops-platform repository will ever be pointed at
+# this cluster, and an EKS-only deployment has no use for it.
+MLOPS_APP_SET=0
+if [[ -n "${TF_VAR_mlops_github_app_id:-}" ]] && [[ -n "${TF_VAR_mlops_github_app_private_key:-}" ]]; then
+  MLOPS_APP_SET=1
+  if [[ -z "${TF_VAR_mlops_github_app_installation_id:-}" ]]; then
+    echo "ERROR: TF_VAR_mlops_github_app_id is set but"
+    echo "       TF_VAR_mlops_github_app_installation_id is not. All three are"
+    echo "       needed to mint an installation token."
+    exit 1
+  fi
+fi
+
 echo "Preflight checks passed."
 
 validate_bcrypt_hash() {
@@ -155,6 +199,23 @@ THANOS_BUCKET_NAME="$(terraform output -raw thanos_bucket_name 2>/dev/null || tr
 LOKI_BUCKET_NAME="$(terraform output -raw loki_bucket_name 2>/dev/null || true)"
 VELERO_BUCKET_NAME="$(terraform output -raw velero_bucket_name 2>/dev/null || true)"
 TEMPO_BUCKET_NAME="$(terraform output -raw tempo_bucket_name 2>/dev/null || true)"
+MLOPS_PIPELINE_ROLE_ARN="$(terraform output -raw mlops_pipeline_role_arn 2>/dev/null || true)"
+MLOPS_SERVING_ROLE_ARN="$(terraform output -raw mlops_serving_role_arn 2>/dev/null || true)"
+ARC_RUNNER_ROLE_ARN="$(terraform output -raw arc_runner_role_arn 2>/dev/null || true)"
+GITHUB_CONFIG_URL="$(terraform output -raw github_config_url 2>/dev/null || true)"
+
+# The platform runner scale set is gated on a label rather than deployed
+# unconditionally. A scale set with no GitHub config does not sit idle - its
+# listener crash-loops against the GitHub API - so an EKS-only cluster must not
+# receive one. The ApplicationSet in gitops/ci/ selects on this label, so when
+# it is absent no Application is generated at all.
+if [[ -n "$GITHUB_CONFIG_URL" ]]; then
+  GITHUB_RUNNERS_LABEL="enabled"
+  echo "github_config_url is set - the platform runner scale set will be deployed."
+else
+  GITHUB_RUNNERS_LABEL="disabled"
+  echo "github_config_url is empty - skipping the runner scale set (ARC controller still installs)."
+fi
 
 echo "Updating kubeconfig..."
 aws eks update-kubeconfig \
@@ -233,6 +294,7 @@ metadata:
     env: dev
     region: ${AWS_REGION}
     cloud: aws
+    github-runners: "${GITHUB_RUNNERS_LABEL}"
   annotations:
     aws-account-id: "${AWS_ACCOUNT_ID}"
     cluster-name: "${CLUSTER_NAME}"
@@ -243,6 +305,10 @@ metadata:
     loki-bucket-name: "${LOKI_BUCKET_NAME}"
     velero-bucket-name: "${VELERO_BUCKET_NAME}"
     tempo-bucket-name: "${TEMPO_BUCKET_NAME}"
+    mlops-pipeline-role-arn: "${MLOPS_PIPELINE_ROLE_ARN}"
+    mlops-serving-role-arn: "${MLOPS_SERVING_ROLE_ARN}"
+    arc-runner-role-arn: "${ARC_RUNNER_ROLE_ARN}"
+    github-config-url: "${GITHUB_CONFIG_URL}"
 type: Opaque
 stringData:
   name: in-cluster-local
@@ -261,4 +327,27 @@ kubectl apply -f "$PROJECTS_DIR/"
 echo "Applying root app..."
 kubectl apply -f "$ROOT_APP"
 
+# Report what was and was not configured, so the state of the two optional
+# integrations is visible at the end of a run rather than discovered from a
+# crash-looping pod later.
+echo
+echo "Secrets Manager entries (both always created; values may be empty):"
+printf '  %-28s %s\n' "arc-github-app" \
+  "$([[ -n "${TF_VAR_github_app_id:-}" ]] && echo "configured" || echo "EMPTY - no CI runners")"
+printf '  %-28s %s\n' "mlops-ingestion-github-app" \
+  "$([[ "$MLOPS_APP_SET" == "1" ]] && echo "configured" || echo "EMPTY - MLOps ingestion cannot push")"
+
+if [[ "$MLOPS_APP_SET" != "1" ]]; then
+  echo
+  echo "  To enable MLOps dataset ingestion later, set these and re-run"
+  echo "  upgrade.sh - no cluster rebuild is needed:"
+  echo "    TF_VAR_mlops_github_app_id"
+  echo "    TF_VAR_mlops_github_app_installation_id"
+  echo "    TF_VAR_mlops_github_app_private_key"
+  echo
+  echo "  The App needs Contents: Read and write on the MLOps repository, and"
+  echo "  must be a different App from the ARC one - see terraform/mlops-secrets.tf."
+fi
+
+echo
 echo "Bootstrap completed successfully."

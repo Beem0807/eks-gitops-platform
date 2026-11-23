@@ -1,0 +1,73 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: crossplane-podmonitor
+  namespace: argocd
+  annotations:
+    # Wave 12: alongside the providers. The PodMonitor CRD comes from the
+    # Prometheus Operator (wave 0), and the pods it selects appear in wave 11.
+    argocd.argoproj.io/sync-wave: "12"
+  labels:
+    app.kubernetes.io/part-of: eks-gitops-platform
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/component: crossplane
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            argocd.argoproj.io/secret-type: cluster
+  template:
+    metadata:
+      name: 'crossplane-podmonitor-{{.nameNormalized}}'
+      labels:
+        app.kubernetes.io/part-of: eks-gitops-platform
+        app.kubernetes.io/managed-by: argocd
+        app.kubernetes.io/component: crossplane
+    spec:
+      project: crossplane
+      source:
+        repoURL: https://github.com/Beem0807/eks-gitops-platform.git
+        targetRevision: main
+        path: charts/raw
+        helm:
+          releaseName: crossplane-podmonitor
+          values: |
+            resources:
+              # A PodMonitor rather than a ServiceMonitor: the Crossplane chart
+              # creates a Service for its webhooks only, so there is no Service
+              # fronting the metrics port to select on.
+              #
+              # The `release: prometheus` label matters. kube-prometheus-stack
+              # is installed with podMonitorSelectorNilUsesHelmValues at its
+              # default of true, so Prometheus only picks up PodMonitors
+              # carrying its release label. Dropping the label would leave this
+              # silently unscraped.
+              - apiVersion: monitoring.coreos.com/v1
+                kind: PodMonitor
+                metadata:
+                  name: crossplane
+                  namespace: crossplane-system
+                  labels:
+                    release: prometheus
+                    app.kubernetes.io/part-of: eks-gitops-platform
+                    app.kubernetes.io/component: crossplane
+                spec:
+                  selector:
+                    matchLabels:
+                      app: crossplane
+                  podMetricsEndpoints:
+                    - port: metrics
+                      path: /metrics
+                      interval: 30s
+      destination:
+        server: '{{.server}}'
+        namespace: crossplane-system
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - ServerSideApply=true

@@ -1,0 +1,145 @@
+# Example: an S3 bucket for ML datasets and model artifacts.
+#
+# Not deployed by anything. Files under examples/ are reference material; the
+# root app only recurses gitops/. Copy these into a consuming repository (for
+# example mlops-platform) and let that repo's ArgoCD Application own them.
+#
+# Prerequisite: the Crossplane AWS providers must be installed and healthy.
+#   kubectl get providers.pkg.crossplane.io
+#
+# Note the API group: s3.aws.m.upbound.io. The "m" is not a typo - it is the
+# namespaced variant of the API. The cluster-scoped variant
+# (s3.aws.upbound.io) is deliberately left inactive by the activation policy in
+# gitops/infrastructure/crossplane/crossplane-provider-config.yaml, so every
+# Crossplane resource lives in a namespace and is governed by that namespace's
+# RBAC.
+---
+apiVersion: s3.aws.m.upbound.io/v1beta1
+kind: Bucket
+metadata:
+  name: ml-datasets
+  namespace: mlops
+spec:
+  # Resolves to the cluster-scoped ClusterProviderConfig named "default", which
+  # authenticates via EKS Pod Identity. This is also the CRD default, so it can
+  # be omitted - it is spelled out here to make the dependency visible.
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: default
+  forProvider:
+    region: ap-south-1
+    # Without this, deleting a non-empty bucket fails and the managed resource
+    # stays stuck in deletion. Leave it false for anything whose contents must
+    # outlive the manifest.
+    # forceDestroy: true
+    tags:
+      Name: ml-datasets
+      Workload: mlops
+
+---
+# Encryption at rest.
+#
+# New buckets are SSE-S3 encrypted by default, so this is explicit
+# confirmation rather than a fix. Being declarative about it means a later
+# change to the account default cannot silently weaken this bucket.
+#
+# The nested shape here is the single trap in this API: `rule` is a list, but
+# `applyServerSideEncryptionByDefault` inside it is a single object. The
+# cluster-scoped API models the latter as a list instead, and almost every
+# example online uses that form - copying it gives a 400 at sync time, because
+# Kubernetes always validates field types.
+apiVersion: s3.aws.m.upbound.io/v1beta1
+kind: BucketServerSideEncryptionConfiguration
+metadata:
+  name: ml-datasets-encryption
+  namespace: mlops
+spec:
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: default
+  forProvider:
+    region: ap-south-1
+    # Must match the Bucket's name, not its Kubernetes object name - they are
+    # the same here because no external-name annotation was set on the Bucket.
+    bucket: ml-datasets
+    rule:
+      - applyServerSideEncryptionByDefault:
+          sseAlgorithm: AES256
+        # Cuts per-object encryption overhead on buckets with many small
+        # objects, which is what a dataset bucket tends to be.
+        bucketKeyEnabled: true
+
+---
+# Versioning. Not enabled by default on new buckets.
+#
+# For model artifacts this is the difference between a retrained model
+# overwriting the artifact a running deployment is serving and that overwrite
+# being recoverable.
+apiVersion: s3.aws.m.upbound.io/v1beta1
+kind: BucketVersioning
+metadata:
+  name: ml-datasets-versioning
+  namespace: mlops
+spec:
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: default
+  forProvider:
+    region: ap-south-1
+    bucket: ml-datasets
+    # Single object, not a list - see the encryption note above.
+    versioningConfiguration:
+      status: Enabled
+
+---
+# Public access block.
+#
+# Every field here defaults to false when omitted, which is the opposite of
+# what the name suggests. All four must be set explicitly.
+apiVersion: s3.aws.m.upbound.io/v1beta1
+kind: BucketPublicAccessBlock
+metadata:
+  name: ml-datasets-public-access-block
+  namespace: mlops
+spec:
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: default
+  forProvider:
+    region: ap-south-1
+    bucket: ml-datasets
+    blockPublicAcls: true
+    blockPublicPolicy: true
+    ignorePublicAcls: true
+    restrictPublicBuckets: true
+
+---
+# Lifecycle rules.
+#
+# Two things worth having on any bucket that receives large uploads:
+# aborting incomplete multipart uploads, which otherwise accrue storage charges
+# that do not show up in the object listing at all; and expiring superseded
+# versions, without which versioning grows the bucket without bound.
+apiVersion: s3.aws.m.upbound.io/v1beta1
+kind: BucketLifecycleConfiguration
+metadata:
+  name: ml-datasets-lifecycle
+  namespace: mlops
+spec:
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: default
+  forProvider:
+    region: ap-south-1
+    bucket: ml-datasets
+    rule:
+      - id: platform-defaults
+        status: Enabled
+        # An empty filter applies the rule to every object. AWS requires either
+        # filter or prefix to be present.
+        filter:
+          - {}
+        abortIncompleteMultipartUpload:
+          - daysAfterInitiation: 7
+        noncurrentVersionExpiration:
+          - noncurrentDays: 30
